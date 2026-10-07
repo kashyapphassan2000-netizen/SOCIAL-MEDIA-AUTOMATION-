@@ -74,6 +74,7 @@ export async function loadConnection(p: Connection["platform"]): Promise<Connect
 export const GOOGLE_SCOPES = [
   "https://www.googleapis.com/auth/youtube.upload",
   "https://www.googleapis.com/auth/youtube.readonly",
+  "https://www.googleapis.com/auth/youtube.force-ssl", // post the first comment
   "https://www.googleapis.com/auth/spreadsheets",
   "openid",
   "email",

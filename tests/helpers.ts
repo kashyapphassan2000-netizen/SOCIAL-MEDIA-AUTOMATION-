@@ -52,7 +52,13 @@ export const SPOKEN =
   "First, boring tasks like tests and boilerplate are now basically free. Second, the people who win are the ones who review and direct the AI, not the ones who type fastest. " +
   "My take? Learn to describe problems clearly, because that is the new programming skill. Would you trust AI to ship your code? Follow for daily AI news.";
 
-export function mockLLM(opts: { failFirst?: boolean } = {}): LLM & { calls: number } {
+export const BEATS = [
+  { text: "First, boring tasks like tests and boilerplate are now basically free.", broll: "programmer laptop code", emphasis: "free" },
+  { text: "Second, the people who win are the ones who review and direct the AI, not the ones who type fastest.", broll: "team meeting office", emphasis: "direct" },
+  { text: "My take? Learn to describe problems clearly, because that is the new programming skill.", broll: "whiteboard planning", emphasis: "skill" },
+];
+
+export function mockLLM(opts: { failFirst?: boolean; beats?: boolean } = {}): LLM & { calls: number } {
   let calls = 0;
   return {
     name: "mock-llm",
@@ -74,6 +80,8 @@ export function mockLLM(opts: { failFirst?: boolean } = {}): LLM & { calls: numb
         hashtags: ["AI", "OpenAI", "coding", "tech"],
         thumbnailText: "JUNIOR DEVS?",
         cta: "Follow for daily AI news",
+        pinnedComment: "Would you let AI ship your code? Yes or no?",
+        ...(opts.beats ? { beats: BEATS } : {}),
         captions,
       }) + "\n```";
     },
@@ -158,7 +166,7 @@ export function schedule(over: Partial<Schedule> = {}): Schedule {
     windowStartHour: 0,
     windowEndHour: 0,
     platforms: [...PLATFORMS],
-    targetSeconds: 45,
+    targetSeconds: 32,
     publishMode: "live",
     enabled: true,
     createdBy: "owner@test",

@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { getAssets, getSettings, saveAssets, saveSettings } from "./db";
 import { getStorage } from "./storage";
-import { extractVoice, probeDuration, rmrf, runFfmpeg, tmpDir } from "./media/ffmpeg";
+import { extractVoice, hasVideoStream, probeDuration, rmrf, runFfmpeg, tmpDir } from "./media/ffmpeg";
 import { elevenCreateVoice } from "./ai/voice";
 import type { Assets } from "./types";
 
@@ -37,6 +37,11 @@ export async function setVoiceClip(url: string, by: string): Promise<{ assets: A
     a.voiceSampleUrl = await storage.put("assets/voice-sample.mp3", fs.readFileSync(full), "audio/mpeg");
     a.voiceRefShortUrl = await storage.put("assets/voice-ref.mp3", fs.readFileSync(short), "audio/mpeg");
     a.elevenVoiceId = undefined;
+    if (await hasVideoStream(src)) {
+      // A video of you talking doubles as the first "performance clip" for natural lip-sync.
+      const clips = (a.clips ?? []).filter((c) => c.name !== "voice clip");
+      a.clips = [{ url, name: "voice clip", addedAt: new Date().toISOString() }, ...clips];
+    }
     if (!a.photoUrl) {
       const still = path.join(dir, "frame.jpg");
       try {
@@ -60,4 +65,39 @@ export async function setVoiceClip(url: string, by: string): Promise<{ assets: A
   } finally {
     rmrf(dir);
   }
+}
+
+/**
+ * Performance clip = 10-60 s of you talking naturally on camera (any words, natural hand gestures,
+ * vertical, face clearly visible, steady framing). Each clip is a brand "look" for real-footage lip-sync.
+ */
+export async function addPerformanceClip(url: string, name: string, by: string): Promise<{ assets: Assets; notes: string[] }> {
+  const storage = getStorage();
+  const dir = tmpDir();
+  const notes: string[] = [];
+  try {
+    const src = path.join(dir, "clip.bin");
+    fs.writeFileSync(src, await storage.read(url));
+    if (!(await hasVideoStream(src))) throw new Error("That file has no video track");
+    const secs = await probeDuration(src);
+    if (secs < 5) throw new Error(`Clip is only ${secs.toFixed(1)}s — record 10-60 s of natural talking`);
+    if (secs > 120) notes.push("Only the first 15 s are used as the motion loop; shorter clips upload faster.");
+    const a = await getAssets();
+    a.clips = [...(a.clips ?? []).filter((c) => c.url !== url), { url, name: name || `clip ${(a.clips?.length ?? 0) + 1}`, addedAt: new Date().toISOString() }];
+    a.updatedAt = new Date().toISOString();
+    a.updatedBy = by;
+    await saveAssets(a);
+    notes.push(`Clip saved — ${a.clips.length} look(s) in rotation.`);
+    return { assets: a, notes };
+  } finally {
+    rmrf(dir);
+  }
+}
+
+export async function removeClip(url: string): Promise<Assets> {
+  const a = await getAssets();
+  a.clips = (a.clips ?? []).filter((c) => c.url !== url);
+  await saveAssets(a);
+  await getStorage().del([url]).catch(() => undefined);
+  return a;
 }

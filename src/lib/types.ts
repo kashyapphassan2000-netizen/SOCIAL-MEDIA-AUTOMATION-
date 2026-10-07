@@ -53,6 +53,9 @@ export interface Schedule {
   targetSeconds: number;
   /** "live" publishes publicly. "private" = YouTube private only, other platforms skipped (safe test). */
   publishMode: "live" | "private";
+  /** Optional recurring series name, e.g. "AI in 30" → titles "AI in 30 #12: ...". Series build recall and binge-watching. */
+  seriesName?: string;
+  episode?: number;
   enabled: boolean;
   createdBy: string;
   createdAt: string;
@@ -66,12 +69,13 @@ export type Stage =
   | "look"
   | "voice"
   | "avatar"
+  | "broll"
   | "edit"
   | "publish"
   | "cleanup"
   | "done";
 
-export const STAGES: Stage[] = ["research", "script", "look", "voice", "avatar", "edit", "publish", "cleanup", "done"];
+export const STAGES: Stage[] = ["research", "script", "look", "voice", "avatar", "broll", "edit", "publish", "cleanup", "done"];
 
 export type JobStatus = "queued" | "running" | "waiting" | "done" | "partial" | "failed";
 
@@ -96,6 +100,11 @@ export interface Script {
   captions: Record<Platform, string>;
   thumbnailText: string;
   cta: string;
+  /** Script segments with B-roll search terms and the word to emphasise on screen. */
+  beats?: { text: string; broll: string; emphasis: string }[];
+  /** First comment the creator posts to start the conversation. */
+  pinnedComment?: string;
+  hookStyle?: string;
 }
 
 export interface WordTiming {
@@ -154,6 +163,7 @@ export interface Job {
     story?: Story;
     script?: Script;
     lookUrl?: string;
+    clipUrl?: string;
     lookName?: string;
     audioUrl?: string;
     audioSeconds?: number;
@@ -165,6 +175,7 @@ export interface Job {
     avatar?: AvatarRequest;
     avatarUrl?: string;
     avatarProvider?: string;
+    broll?: { url: string; kind: "video" | "image"; start: number; end: number; query: string; source: string }[];
     videoUrl?: string;
     thumbnailUrl?: string;
     editMode?: string;
@@ -208,11 +219,25 @@ export interface BrandSettings {
   llmProviders: string[];
   /** Google Sheet id for the run log (falls back to GOOGLE_SHEET_ID env). */
   sheetId: string;
+  /** One line: what viewers get from you. Steers every script. */
+  brandPromise: string;
+  /** Spoken sign-off at the end of every video (brand recall), e.g. "I'm Kashyap. Follow for your daily AI edge." */
+  signature: string;
+  /** Your own hashtag added to every post, e.g. "KashyapAI". */
+  brandHashtag: string;
+  /** Natural editing: punch-in cuts, B-roll cutaways, whoosh SFX. */
+  broll: boolean;
+  punchIns: boolean;
+  sfx: boolean;
+  /** Post the generated first comment (YouTube / Instagram). Pinning is not possible via API. */
+  firstComment: boolean;
 }
 
 export interface Assets {
   photoUrl?: string;
   clipUrl?: string;
+  /** Real "performance" clips of you talking with natural gestures (different outfits/locations = brand looks). */
+  clips?: { url: string; name: string; addedAt: string }[];
   voiceSampleUrl?: string;
   /** ≤12s excerpt used as a zero-shot voice reference (F5-TTS). */
   voiceRefShortUrl?: string;

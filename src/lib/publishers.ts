@@ -415,6 +415,30 @@ export const telegram: Publisher = {
   },
 };
 
+/**
+ * Creator's first comment (a question) right after posting — early comments are a strong ranking
+ * signal. The APIs cannot PIN a comment; pin it from the app if you want it on top.
+ */
+export async function postFirstComment(p: Platform, postId: string, text: string): Promise<boolean> {
+  if (!text) return false;
+  if (p === "youtube") {
+    const token = await googleAccessToken();
+    await httpJson("https://www.googleapis.com/youtube/v3/commentThreads?part=snippet", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ snippet: { videoId: postId, topLevelComment: { snippet: { textOriginal: text } } } }),
+      retries: 1,
+    });
+    return true;
+  }
+  if (p === "instagram") {
+    const { token, host } = await metaToken("instagram");
+    await httpJson(`${host}/${postId}/comments`, { method: "POST", body: form({ message: text, access_token: token }), retries: 1 });
+    return true;
+  }
+  return false;
+}
+
 export const PUBLISHERS: Record<Platform, Publisher> = { youtube, instagram, facebook, threads, x, linkedin, pinterest, bluesky, telegram };
 
 /** Errors that will never succeed on retry (bad permissions / policy) — fail fast instead of burning attempts. */

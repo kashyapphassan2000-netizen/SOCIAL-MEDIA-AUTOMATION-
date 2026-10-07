@@ -90,6 +90,7 @@ export interface OverlayOpts {
   text: string;
   width?: number;
   height?: number;
+  emphasis?: string[];
 }
 
 /** Full-video ASS: hook banner, karaoke word captions, handle watermark, end-card CTA. */
@@ -108,13 +109,20 @@ export function buildOverlayAss(o: OverlayOpts): string {
   if (o.hook) {
     lines.push(`Dialogue: 2,${assTime(0)},${assTime(hookEnd)},Hook,,0,0,0,,{\\fad(120,200)}${assEscape(o.hook.toUpperCase())}`);
   }
+  const emph = new Set((o.emphasis ?? []).map((w) => w.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "")).filter(Boolean));
+  const isEmph = (w: string) => emph.has(w.toLowerCase().replace(/[^\p{L}\p{N}]/gu, ""));
   for (const chunk of chunkWords(o.words)) {
     for (let i = 0; i < chunk.length; i++) {
       const start = chunk[i].start;
       const end = i + 1 < chunk.length ? chunk[i + 1].start : chunk[chunk.length - 1].end + 0.08;
       if (end <= start) continue;
       const text = chunk
-        .map((w, j) => (j === i ? `{\\c${accent}\\fscx112\\fscy112}${assEscape(w.word.toUpperCase())}{\\c${white}\\fscx100\\fscy100}` : assEscape(w.word.toUpperCase())))
+        .map((w, j) => {
+          const t = assEscape(w.word.toUpperCase());
+          if (j === i) return `{\\c${accent}\\fscx112\\fscy112}${t}{\\c${white}\\fscx100\\fscy100}`;
+          if (isEmph(w.word)) return `{\\c${accent}\\fscx106\\fscy106}${t}{\\c${white}\\fscx100\\fscy100}`;
+          return t;
+        })
         .join(" ");
       lines.push(`Dialogue: 1,${assTime(start)},${assTime(end)},Cap,,0,0,0,,${text}`);
     }

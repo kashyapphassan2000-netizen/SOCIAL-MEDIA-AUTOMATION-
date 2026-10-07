@@ -8,7 +8,7 @@ import { http } from "./http";
  * claims them over HTTP, renders, and uploads the result. The worker can run on GitHub Actions
  * (free), Kaggle (30 free GPU h/week), Google Colab, or your own PC — anything with Python.
  */
-export type FreeTaskKind = "tts" | "avatar";
+export type FreeTaskKind = "tts" | "avatar" | "lipsync";
 
 export interface FreeTask {
   id: string;

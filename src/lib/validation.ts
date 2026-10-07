@@ -11,7 +11,9 @@ export const scheduleInput = z.object({
   windowStartHour: z.number().int().min(0).max(23).default(0),
   windowEndHour: z.number().int().min(0).max(23).default(0),
   platforms: z.array(z.enum(PLATFORMS)).min(1),
-  targetSeconds: z.number().int().min(20).max(58).default(45),
+  // 28-35 s is the retention sweet spot for Shorts/Reels; allowed 20-58.
+  targetSeconds: z.number().int().min(20).max(58).default(32),
+  seriesName: z.string().trim().max(40).optional(),
   publishMode: z.enum(["live", "private"]).default("live"),
   enabled: z.boolean().default(true),
 });
@@ -48,6 +50,13 @@ export const settingsInput = z.object({
   voiceProviders: z.array(z.string()).min(1),
   llmProviders: z.array(z.string()).min(1),
   sheetId: z.string().trim().max(200),
+  brandPromise: z.string().trim().max(200).default(""),
+  signature: z.string().trim().max(120).default(""),
+  brandHashtag: z.string().trim().max(40).regex(/^[\p{L}\p{N}_]*$/u, "letters/numbers only, no #").default(""),
+  broll: z.boolean().default(true),
+  punchIns: z.boolean().default(true),
+  sfx: z.boolean().default(true),
+  firstComment: z.boolean().default(true),
 });
 
 export function parse<T>(schema: z.ZodType<T>, data: unknown): T {

@@ -1,4 +1,6 @@
-# Free worker: renders queued voice-clone ("tts") and talking-head ("avatar") tasks with open-source models.
+# Free worker: renders queued voice-clone ("tts"), real-clip lip-sync ("lipsync") and photo-avatar ("avatar") tasks
+# with open-source model plugins (worker/plugins). GitHub runners have no GPU: they do voice (+ slow CPU avatars);
+# GPU kinds (lipsync, avatar) go to Kaggle when KAGGLE_* secrets exist.
 # Started automatically by the app (workflow_dispatch) when tasks are queued; the schedule is a safety net.
 # Repo secrets: APP_URL, WORKER_SECRET. Optional: KAGGLE_USERNAME + KAGGLE_KEY to render avatars on Kaggle's free GPU.
 # Cost: free on public repos; private repos get 2,000 free minutes/month (voice ≈ 6 min/video).
@@ -7,8 +9,8 @@ on:
   workflow_dispatch:
     inputs:
       kinds:
-        description: "tts, avatar or tts,avatar"
-        default: "tts,avatar"
+        description: "tts, lipsync, avatar (comma separated)"
+        default: "tts,lipsync,avatar"
   schedule:
     - cron: "23 */3 * * *"
 concurrency:
@@ -23,7 +25,7 @@ jobs:
     steps:
       - id: p
         env:
-          KINDS: ${{ github.event.inputs.kinds || 'tts,avatar' }}
+          KINDS: ${{ github.event.inputs.kinds || 'tts,lipsync,avatar' }}
           HAS_KAGGLE: ${{ secrets.KAGGLE_KEY != '' }}
         run: |
           echo "kinds=$KINDS" >> "$GITHUB_OUTPUT"
@@ -45,7 +47,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.shorts-worker
-          key: shorts-worker-v1-${{ runner.os }}-${{ hashFiles('worker/setup.sh') }}
+          key: shorts-worker-v2-${{ runner.os }}-${{ hashFiles('worker/plugins/**/plugin.json', 'worker/plugins/**/setup.py') }}
       - name: Install ffmpeg
         run: command -v ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
       - name: Setup models
@@ -63,7 +65,7 @@ jobs:
 
   kaggle:
     needs: plan
-    if: needs.plan.outputs.kaggle == 'true' && contains(needs.plan.outputs.kinds, 'avatar')
+    if: needs.plan.outputs.kaggle == 'true' && (contains(needs.plan.outputs.kinds, 'avatar') || contains(needs.plan.outputs.kinds, 'lipsync'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -75,5 +77,5 @@ jobs:
           KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
           APP_URL: ${{ secrets.APP_URL }}
           WORKER_SECRET: ${{ secrets.WORKER_SECRET }}
-          WORKER_KINDS: avatar
+          WORKER_KINDS: lipsync,avatar
         run: python worker/kaggle_push.py

@@ -51,16 +51,15 @@ function falProvider(name: string, model: string, maxSeconds: number, build: (i:
   };
 }
 
-export const AVATAR_REGISTRY: Record<string, AvatarProvider> = {
-  // FREE: SadTalker (MIT) on your own worker (GitHub Actions / Kaggle / PC). Slower and less expressive than paid models.
-  "free-sadtalker": {
-    name: "free-sadtalker",
-    maxSeconds: 90,
-    timeoutMin: Number(process.env.FREE_AVATAR_TIMEOUT_MIN || 150), // CPU renders are slow
-    available: () => freeWorkerEnabled(),
+function freeWorkerProvider(name: string, kind: "lipsync" | "avatar", maxSeconds: number, input: (i: AvatarInput) => Record<string, string> | null): AvatarProvider {
+  return {
+    name,
+    maxSeconds,
+    timeoutMin: Number(process.env.FREE_AVATAR_TIMEOUT_MIN || 150),
+    available: (i) => freeWorkerEnabled() && input(i) !== null,
     async submit(i) {
-      const t = await enqueueTask("avatar", { imageUrl: i.imageUrl, audioUrl: i.audioUrl });
-      return { provider: "free-sadtalker", requestId: t.id, submittedAt: new Date().toISOString() };
+      const t = await enqueueTask(kind, input(i)!);
+      return { provider: name, requestId: t.id, submittedAt: new Date().toISOString() };
     },
     async poll(req) {
       const t = await getTask(req.requestId);
@@ -69,7 +68,15 @@ export const AVATAR_REGISTRY: Record<string, AvatarProvider> = {
       if (t.status === "failed") return { state: "failed", error: t.error ?? "worker failed" };
       return { state: "pending" };
     },
-  },
+  };
+}
+
+export const AVATAR_REGISTRY: Record<string, AvatarProvider> = {
+  // FREE + MOST NATURAL: lip-sync onto one of YOUR real recorded clips (LatentSync / MuseTalk plugin on your worker).
+  // Real body, real hands, real background — only the mouth is AI.
+  "free-lipsync": freeWorkerProvider("free-lipsync", "lipsync", 120, (i) => (i.clipUrl ? { videoUrl: i.clipUrl, audioUrl: i.audioUrl } : null)),
+  // FREE: photo -> talking video on your worker (EchoMimicV3-Flash with gestures on a GPU, SadTalker on CPU).
+  "free-avatar": freeWorkerProvider("free-avatar", "avatar", 90, (i) => ({ imageUrl: i.imageUrl, audioUrl: i.audioUrl })),
   // ByteDance OmniHuman 1.5 — best expressiveness; 720p accepts up to 60s audio.
   "fal-omnihuman": falProvider("fal-omnihuman", process.env.FAL_OMNIHUMAN_MODEL || "fal-ai/bytedance/omnihuman/v1.5", 60, (i) => ({
     image_url: i.imageUrl,
@@ -99,3 +106,5 @@ export const AVATAR_REGISTRY: Record<string, AvatarProvider> = {
     },
   },
 };
+// backwards-compatible alias
+AVATAR_REGISTRY["free-sadtalker"] = AVATAR_REGISTRY["free-avatar"];

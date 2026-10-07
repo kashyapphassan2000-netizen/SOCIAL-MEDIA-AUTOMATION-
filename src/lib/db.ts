@@ -39,7 +39,8 @@ export const DEFAULT_SETTINGS: BrandSettings = {
     { name: "Charcoal hoodie", prompt: "wearing a minimal charcoal grey hoodie, no logos" },
   ],
   generateLooks: true,
-  avatarMode: "photo",
+  // "clip" = lip-sync onto your real recorded clips (most natural); falls back to photo providers when no clip exists.
+  avatarMode: "clip",
   allowGenericVoiceFallback: false,
   allowStillImageFallback: true,
   maxVideosPerDay: 6,
@@ -49,10 +50,17 @@ export const DEFAULT_SETTINGS: BrandSettings = {
   musicUrl: "",
   musicVolume: 0.08,
   // Free first; paid providers only kick in if their key is set (and the free path fails).
-  avatarProviders: ["free-sadtalker", "fal-omnihuman", "fal-fabric", "still"],
-  voiceProviders: ["free-chatterbox", "elevenlabs", "fal-f5"],
+  avatarProviders: ["free-avatar", "fal-omnihuman", "fal-fabric", "still"],
+  voiceProviders: ["free-voice", "elevenlabs", "fal-f5"],
   llmProviders: ["gemini", "groq", "cerebras", "openrouter", "nvidia", "anthropic", "openai"],
   sheetId: "",
+  brandPromise: "",
+  signature: "",
+  brandHashtag: "",
+  broll: true,
+  punchIns: true,
+  sfx: true,
+  firstComment: true,
 };
 
 // ---------- users ----------

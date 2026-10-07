@@ -1,0 +1,19 @@
+{
+  "id": "musetalk",
+  "name": "MuseTalk 1.5 — real-time lip-sync onto YOUR real clip (natural body + gestures)",
+  "kind": "lipsync",
+  "license": "MIT",
+  "homepage": "https://github.com/TMElyralab/MuseTalk",
+  "repo": "https://github.com/TMElyralab/MuseTalk",
+  "python": "3.10",
+  "torch": { "torch": "2.0.1", "torchvision": "0.15.2", "torchaudio": "2.0.2" },
+  "torch_cuda": "cu118",
+  "find_links": ["https://download.openmmlab.com/mmcv/dist/cu118/torch2.0/index.html"],
+  "repo_requirements": "requirements.txt",
+  "requirements": ["mmengine", "mmcv==2.0.1", "mmdet==3.1.0", "mmpose==1.1.0", "huggingface_hub", "gdown"],
+  "gpu": "required",
+  "min_vram_gb": 6,
+  "timeout_min": 60,
+  "status": "experimental — needs an NVIDIA GPU; not runnable in the CI sandbox",
+  "notes": "30fps+ on V100; a 30 s short is ~1-3 min on a T4/RTX 3060. Quality: good mouth, mild blur on teeth."
+}

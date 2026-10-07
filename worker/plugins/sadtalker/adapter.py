@@ -1,7 +1,8 @@
 """Talking head from one photo + audio with SadTalker (MIT, Tencent AI Lab). Runs inside the sadtalker venv.
 
-usage: python avatar_sadtalker.py <sadtalker_src_dir> <checkpoint_dir> <image> <audio.wav> <out.mp4>
+Contract: --image I --audio A --out OUT.mp4   (code in $PLUGIN_REPO, weights in $PLUGIN_DATA)
 """
+import argparse
 import os
 import shutil
 import sys
@@ -23,7 +24,12 @@ sys.modules.setdefault("gfpgan", _g)
 
 
 def main():
-    src, ckpt, image, audio, out = sys.argv[1:6]
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--image", required=True)
+    ap.add_argument("--audio", required=True)
+    ap.add_argument("--out", required=True)
+    a = ap.parse_args()
+    src, ckpt, image, audio, out = os.environ["PLUGIN_REPO"], os.environ["PLUGIN_DATA"], a.image, a.audio, a.out
     size = int(os.environ.get("SADTALKER_SIZE", "256"))
     batch = int(os.environ.get("SADTALKER_BATCH", "8"))
     sys.path.insert(0, src)

@@ -46,7 +46,7 @@ export async function startUrl(p: OAuthProvider): Promise<string> {
     case "instagram":
       return `https://www.instagram.com/oauth/authorize?${q({
         client_id: process.env.INSTAGRAM_APP_ID!, redirect_uri: redirect(p), response_type: "code", state,
-        scope: "instagram_business_basic,instagram_business_content_publish",
+        scope: "instagram_business_basic,instagram_business_content_publish,instagram_business_manage_comments,instagram_business_manage_insights",
       })}`;
     case "threads":
       return `https://threads.net/oauth/authorize?${q({ client_id: process.env.THREADS_APP_ID!, redirect_uri: redirect(p), response_type: "code", state, scope: "threads_basic,threads_content_publish" })}`;

@@ -1,7 +1,8 @@
 """Voice clone with Chatterbox (MIT, Resemble AI). Runs inside the tts venv.
 
-usage: python tts_chatterbox.py <ref_audio> <text_file> <out.wav> <language>
+Contract: --text-file T --ref R --lang L --out OUT.wav
 """
+import argparse
 import re
 import sys
 import time
@@ -26,7 +27,13 @@ def chunks(text: str, limit: int = 260):
 
 
 def main():
-    ref, text_file, out, lang = sys.argv[1], sys.argv[2], sys.argv[3], (sys.argv[4] if len(sys.argv) > 4 else "en")
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--text-file", required=True)
+    ap.add_argument("--ref", required=True)
+    ap.add_argument("--lang", default="en")
+    ap.add_argument("--out", required=True)
+    a = ap.parse_args()
+    ref, text_file, out, lang = a.ref, a.text_file, a.out, a.lang
     text = open(text_file, encoding="utf-8").read()
     device = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
     t0 = time.time()

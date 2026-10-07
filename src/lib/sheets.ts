@@ -15,6 +15,7 @@ export const TABS = {
     "Video title", "Voice", "Avatar", "Edit", ...PLATFORMS.map((p) => `${p} link`), "Errors", "Minutes taken",
   ],
   Activity: ["Time (local)", "Who", "Role", "Action", "Details"],
+  Performance: ["Measured (local)", "Job ID", "Title", "Hook style", "Views (all platforms)", "Likes", "Comments", "Views per platform"],
 } as const;
 
 export type Tab = keyof typeof TABS;

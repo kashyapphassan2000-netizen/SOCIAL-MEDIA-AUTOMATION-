@@ -6,12 +6,14 @@ import { fetchTrends, storyHash, type TrendFetcher } from "./ai/trends";
 import { VOICE_REGISTRY, type VoiceProvider } from "./ai/voice";
 import { AVATAR_REGISTRY, type AvatarProvider } from "./ai/avatar";
 import { generateLook } from "./ai/looks";
-import { PUBLISHERS, isPermanent, type Publisher } from "./publishers";
+import { PUBLISHERS, isPermanent, postFirstComment, type Publisher } from "./publishers";
 import { ReauthRequired } from "./connections";
 import { estimateWordTimings } from "./media/captions";
-import { PROFILES, renderShort } from "./media/editor";
+import { PROFILES, planPunchIns, renderShort } from "./media/editor";
+import { findBroll, planCutaways, type BrollFinder } from "./media/broll";
 import { imageExt, probeDuration, rmrf, runFfmpeg, tmpDir } from "./media/ffmpeg";
 import { getStorage, type Storage } from "./storage";
+import { chooseHookStyle, collectStats, learnings, recordPublished } from "./insights";
 import { getKV } from "./store/kv";
 import { jobRow, flushSheet, logRow } from "./sheets";
 import {
@@ -28,6 +30,8 @@ export interface Deps {
   publishers: Record<Platform, Publisher>;
   generateLook: typeof generateLook;
   storage: () => Storage;
+  findBroll: BrollFinder;
+  firstComment: typeof postFirstComment;
 }
 
 const pick = <T,>(reg: Record<string, T>, order: string[]) => order.map((n) => reg[n]).filter((x): x is T => !!x);
@@ -39,11 +43,14 @@ export const defaultDeps: Deps = {
     if (s.allowGenericVoiceFallback && !list.includes(VOICE_REGISTRY["openai-tts"])) list.push(VOICE_REGISTRY["openai-tts"]);
     return list;
   },
-  avatars: (s) => pick(AVATAR_REGISTRY, s.avatarMode === "clip" ? ["fal-lipsync-clip", ...s.avatarProviders] : s.avatarProviders),
+  // Clip mode puts the real-footage lip-sync providers first; photo providers remain as fallback.
+  avatars: (s) => pick(AVATAR_REGISTRY, s.avatarMode === "clip" ? ["free-lipsync", "fal-lipsync-clip", ...s.avatarProviders] : s.avatarProviders),
   trends: fetchTrends,
   publishers: PUBLISHERS,
   generateLook,
   storage: getStorage,
+  findBroll,
+  firstComment: postFirstComment,
 };
 
 let deps: Deps = defaultDeps;
@@ -54,9 +61,9 @@ export function setDeps(d: Partial<Deps>) {
 // ------------------------------------------------------------------
 type StageResult = { next: Stage } | { wait: number };
 
-const MAX_ATTEMPTS: Record<Stage, number> = { research: 3, script: 3, look: 2, voice: 4, avatar: 6, edit: 3, publish: 1, cleanup: 5, done: 1 };
+const MAX_ATTEMPTS: Record<Stage, number> = { research: 3, script: 3, look: 2, voice: 4, avatar: 6, broll: 2, edit: 3, publish: 1, cleanup: 5, done: 1 };
 /** Seconds of function time a stage needs before we dare start it (Vercel kills at maxDuration). */
-const STAGE_BUDGET: Partial<Record<Stage, number>> = { edit: 150, publish: 120, voice: 60, look: 60, script: 60, research: 40 };
+const STAGE_BUDGET: Partial<Record<Stage, number>> = { edit: 150, publish: 120, voice: 60, look: 60, script: 60, research: 40, broll: 70 };
 const MAX_ACTIVE_JOBS = Number(process.env.MAX_ACTIVE_JOBS || 3);
 const AVATAR_TIMEOUT_MIN = 25;
 
@@ -92,19 +99,49 @@ async function research(job: Job, s: BrandSettings): Promise<StageResult> {
 }
 
 async function script(job: Job, s: BrandSettings): Promise<StageResult> {
-  const sched = (await getSchedule(job.scheduleId)) ?? ({ topic: job.topic, instructions: "", language: "en", targetSeconds: 45 } as unknown as Schedule);
-  const target = Math.min(58, Math.max(20, sched.targetSeconds || 45));
-  const { data, provider, errors } = await generateJson(deps.llms(s), SCRIPT_SYSTEM, scriptUser({ ...sched, targetSeconds: target }, job.data.story!, s), (v) => validateScript(v, target));
+  const sched = (await getSchedule(job.scheduleId)) ?? ({ id: job.scheduleId, topic: job.topic, instructions: "", language: "en", targetSeconds: 32 } as unknown as Schedule);
+  const target = Math.min(58, Math.max(20, sched.targetSeconds || 32));
+  const learned = await learnings(job.scheduleId).catch(() => null);
+  const hookStyle = await chooseHookStyle(job.scheduleId, learned);
+  let episode: number | undefined;
+  if (sched.seriesName && sched.id) {
+    episode = (sched.episode ?? 0) + 1;
+    const fresh = await getSchedule(sched.id);
+    if (fresh) await saveSchedule({ ...fresh, episode });
+  }
+  const { data, provider, errors } = await generateJson(
+    deps.llms(s),
+    SCRIPT_SYSTEM,
+    scriptUser({ ...sched, targetSeconds: target }, job.data.story!, s, { hookStyle, episode, learnings: learned }),
+    (v) => validateScript(v, target),
+  );
   if (errors.length) log(job, "warn", `LLM retries: ${errors.join(" | ")}`);
+  data.hookStyle = hookStyle;
+  if (s.brandHashtag) {
+    // Same brand tag on every post on every platform = searchable brand footprint.
+    const tag = `#${s.brandHashtag}`;
+    if (!data.hashtags.includes(s.brandHashtag)) data.hashtags = [s.brandHashtag, ...data.hashtags].slice(0, 10);
+    const limit: Partial<Record<Platform, number>> = { x: 275, bluesky: 295, threads: 495, pinterest: 495 };
+    for (const p of Object.keys(data.captions) as Platform[]) {
+      if (data.captions[p].includes(tag)) continue;
+      const next = `${data.captions[p]} ${tag}`;
+      if (next.length <= (limit[p] ?? 2000)) data.captions[p] = next;
+    }
+  }
   job.data.script = data;
-  log(job, "info", `Script by ${provider}: "${data.title}" (${data.spoken.split(/\s+/).length} words)`);
+  log(job, "info", `Script by ${provider} [hook: ${hookStyle}${learned ? ", learning from past posts" : ""}]: "${data.title}" (${data.spoken.split(/\s+/).length} words)`);
   return { next: "look" };
 }
 
 async function look(job: Job, s: BrandSettings): Promise<StageResult> {
   const assets = await getAssets();
-  if (s.avatarMode === "clip" && assets.clipUrl) {
+  const clips = assets.clips?.length ? assets.clips : assets.clipUrl ? [{ url: assets.clipUrl, name: "voice clip", addedAt: "" }] : [];
+  if (s.avatarMode === "clip" && clips.length) {
+    // Rotate your real clips (different outfits / places) — consistent face, varied look, zero AI artefacts on the body.
+    const c = clips[await nextLookIndex(clips.length)];
+    job.data.clipUrl = c.url;
     job.data.lookUrl = assets.photoUrl;
+    job.data.lookName = `clip: ${c.name}`;
     return { next: "voice" };
   }
   if (!assets.photoUrl) throw new Error("No creator photo uploaded — open Studio and upload your photo");
@@ -177,7 +214,7 @@ async function voice(job: Job, s: BrandSettings): Promise<StageResult> {
     const r = p?.poll ? await p.poll(vt.taskId) : ({ state: "failed", error: "provider removed" } as const);
     if (r.state === "done") {
       const ext = r.url.split("?")[0].split(".").pop() || "mp3";
-      return finish(vt.provider, p!.cloned, await storage.read(r.url), ext, r.url);
+      return finish(r.engine ? `${vt.provider}/${r.engine}` : vt.provider, p!.cloned, await storage.read(r.url), ext, r.url, r.words);
     }
     const mins = (Date.now() - new Date(vt.submittedAt).getTime()) / 60000;
     if (r.state === "pending" && mins < VOICE_TIMEOUT_MIN) return { wait: 30 };
@@ -212,7 +249,7 @@ async function voice(job: Job, s: BrandSettings): Promise<StageResult> {
 async function avatar(job: Job, s: BrandSettings): Promise<StageResult> {
   const providers = deps.avatars(s).filter((p) => p.name !== "still" || s.allowStillImageFallback);
   const assets = await getAssets();
-  const input = { imageUrl: job.data.lookUrl!, audioUrl: job.data.audioUrl!, clipUrl: assets.clipUrl, audioSeconds: job.data.audioSeconds ?? 0 };
+  const input = { imageUrl: job.data.lookUrl!, audioUrl: job.data.audioUrl!, clipUrl: job.data.clipUrl ?? assets.clipUrl, audioSeconds: job.data.audioSeconds ?? 0 };
   const req = job.data.avatar;
   if (req) {
     const p = providers.find((x) => x.name === req.provider);
@@ -226,7 +263,7 @@ async function avatar(job: Job, s: BrandSettings): Promise<StageResult> {
       job.data.avatarProvider = req.provider;
       if (req.provider.startsWith("free-")) job.blobs.push(res.videoUrl); // stored in our Blob — delete after posting
       log(job, "info", `Avatar ready from ${req.provider}`);
-      return { next: "edit" };
+      return { next: "broll" };
     } else {
       log(job, "warn", `${req.provider} failed: ${res.error}`);
     }
@@ -245,7 +282,7 @@ async function avatar(job: Job, s: BrandSettings): Promise<StageResult> {
       job.data.avatarUrl = "";
       job.data.avatarProvider = "still (no lip-sync)";
       log(job, "warn", "Using animated still photo fallback (no lip-sync)");
-      return { next: "edit" };
+      return { next: "broll" };
     }
     try {
       job.data.avatar = await p.submit(input);
@@ -257,6 +294,29 @@ async function avatar(job: Job, s: BrandSettings): Promise<StageResult> {
   }
   job.data.avatarProviderIndex = 0; // next attempt starts over from the best provider
   throw new Error("All avatar providers failed");
+}
+
+/** Fetch 2-3 relevant B-roll cutaways. Never fatal: a short without B-roll still ships. */
+async function brollStage(job: Job, s: BrandSettings): Promise<StageResult> {
+  const sc = job.data.script!;
+  if (!s.broll || !sc.beats?.length || !job.data.words?.length) return { next: "edit" };
+  const plan = planCutaways(sc, job.data.words, job.data.audioSeconds ?? 0);
+  const storage = deps.storage();
+  const got: NonNullable<Job["data"]["broll"]> = [];
+  for (const c of plan) {
+    try {
+      const hit = await deps.findBroll(c.query);
+      if (!hit) continue;
+      const url = await storage.put(`jobs/${job.id}/broll-${got.length}.${hit.kind === "video" ? "mp4" : "jpg"}`, hit.buf, hit.kind === "video" ? "video/mp4" : "image/jpeg");
+      job.blobs.push(url);
+      got.push({ ...c, url, kind: hit.kind, source: hit.source });
+    } catch (e) {
+      log(job, "warn", `B-roll "${c.query}" failed: ${(e as Error).message}`);
+    }
+  }
+  job.data.broll = got;
+  log(job, "info", got.length ? `B-roll: ${got.map((g) => `${g.query} (${g.source}, ${g.start}-${g.end}s)`).join("; ")}` : "No B-roll used");
+  return { next: "edit" };
 }
 
 async function edit(job: Job, s: BrandSettings): Promise<StageResult> {
@@ -281,10 +341,23 @@ async function edit(job: Job, s: BrandSettings): Promise<StageResult> {
       }
     }
     const sc = job.data.script!;
+    const broll: { path: string; kind: "video" | "image"; start: number; end: number }[] = [];
+    for (const [i, b] of (job.data.broll ?? []).entries()) {
+      try {
+        const p = path.join(dir, `broll-${i}.${b.kind === "video" ? "mp4" : "jpg"}`);
+        fs.writeFileSync(p, await storage.read(b.url));
+        broll.push({ path: p, kind: b.kind, start: b.start, end: b.end });
+      } catch {
+        /* skip a missing cutaway */
+      }
+    }
+    const words = job.data.words ?? [];
     const input = {
       workDir: dir, visualPath: visual, isStill: still, audioPath: audio, musicPath: music, musicVolume: s.musicVolume,
-      words: job.data.words ?? [], hook: sc.onScreenHook, handle: s.handle, cta: sc.cta || s.ctaText,
+      words, hook: sc.onScreenHook, handle: s.handle, cta: sc.cta || s.ctaText,
       primary: s.primaryColor, accent: s.accentColor, text: s.textColor, thumbnailText: sc.thumbnailText,
+      broll, punchIns: s.punchIns && !still ? planPunchIns(words, job.data.audioSeconds ?? 0) : [], sfx: s.sfx,
+      emphasis: (sc.beats ?? []).map((b) => b.emphasis).filter(Boolean),
     };
     let out: { videoPath: string; thumbPath: string; mode: string } | null = null;
     for (const prof of PROFILES) {
@@ -352,6 +425,11 @@ async function publish(job: Job, s: BrandSettings): Promise<StageResult> {
         if (r.state === "done") {
           await bumpDayCount(`post:${p}`, s.timezone);
           log(job, "info", `Published to ${p}: ${r.url}`);
+          if (s.firstComment && job.data.script?.pinnedComment && r.postId && (p === "youtube" || p === "instagram")) {
+            await deps.firstComment(p, r.postId, job.data.script.pinnedComment)
+              .then((ok) => ok && log(job, "info", `First comment posted on ${p}`))
+              .catch((e) => log(job, "warn", `First comment on ${p} failed (reconnect to grant comment permission): ${(e as Error).message.slice(0, 160)}`));
+          }
         }
       } catch (e) {
         const err = e as Error & { resetPending?: boolean };
@@ -392,6 +470,7 @@ async function cleanup(job: Job, s: BrandSettings): Promise<StageResult> {
   const ok = results.filter((r) => r === "done").length;
   if (job.status !== "failed") job.status = ok > 0 && ok === attempted.length ? "done" : ok > 0 || attempted.length === 0 ? "partial" : "failed";
   job.finishedAt = new Date().toISOString();
+  await recordPublished(job).catch(() => undefined);
   if (!job.sheetLogged) {
     await logRow("Runs", jobRow(job, s.timezone));
     job.sheetLogged = true;
@@ -400,7 +479,7 @@ async function cleanup(job: Job, s: BrandSettings): Promise<StageResult> {
 }
 
 const STAGE_FNS: Record<Exclude<Stage, "done">, (j: Job, s: BrandSettings) => Promise<StageResult>> = {
-  research, script, look, voice, avatar, edit, publish, cleanup,
+  research, script, look, voice, avatar, broll: brollStage, edit, publish, cleanup,
 };
 
 /** Run exactly one stage of one job, with retry / fail bookkeeping. */
@@ -525,6 +604,8 @@ export async function tick(opts: { budgetSec?: number; enqueue?: boolean } = {})
   let flushed = 0;
   try {
     flushed = await flushSheet().catch(() => 0);
+    // Pull real views/likes/comments for recent posts every 2 h (feeds the learning loop).
+    if (await kv.setNx("perf:collect", "1", 2 * 3600)) await collectStats(await getSettings()).catch(() => 0);
     if (opts.enqueue !== false) created = (await enqueueDue()).length;
     for (;;) {
       const left = budgetMs - (Date.now() - t0);

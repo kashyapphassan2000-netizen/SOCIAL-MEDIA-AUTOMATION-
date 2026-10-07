@@ -1,0 +1,17 @@
+{
+  "id": "echomimicv3-flash",
+  "name": "EchoMimicV3-Flash — photo to half-body talking video WITH hand gestures",
+  "kind": "avatar",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/antgroup/echomimic_v3",
+  "repo": "https://github.com/antgroup/echomimic_v3",
+  "python": "3.10",
+  "torch": { "torch": "2.6.0", "torchvision": "0.21.0", "torchaudio": "2.6.0" },
+  "repo_requirements": "requirements.txt",
+  "requirements": ["huggingface_hub", "modelscope"],
+  "gpu": "required",
+  "min_vram_gb": 12,
+  "timeout_min": 240,
+  "status": "experimental — needs a 12 GB+ NVIDIA GPU; not runnable in the CI sandbox",
+  "notes": "Best open gesture model in this catalog. Speed (paper): 5 s of half-body video ≈ 4 min on an A100 (standard); Flash is 8-step. Expect a 30 s short to take 10-30 min on an RTX 4090, much longer on a T4."
+}

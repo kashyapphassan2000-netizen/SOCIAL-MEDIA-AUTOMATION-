@@ -1,0 +1,12 @@
+{
+  "id": "faster-whisper",
+  "name": "faster-whisper — word-level timestamps for frame-accurate captions",
+  "kind": "align",
+  "license": "MIT",
+  "homepage": "https://github.com/SYSTRAN/faster-whisper",
+  "python": "3.11",
+  "requirements": ["faster-whisper==1.1.1", "requests"],
+  "gpu": "optional",
+  "timeout_min": 20,
+  "notes": "CPU is fine (small model). Script words are kept; whisper only supplies the timing."
+}

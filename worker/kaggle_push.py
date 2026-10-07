@@ -7,6 +7,8 @@ env: KAGGLE_USERNAME, KAGGLE_KEY (kaggle.com -> Settings -> API -> Create New To
 The kernel is PRIVATE; it embeds APP_URL + WORKER_SECRET so it can call your app.
 """
 import base64
+import io
+import zipfile
 import json
 import os
 import subprocess
@@ -15,22 +17,31 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 user = os.environ["KAGGLE_USERNAME"]
-files = {n: base64.b64encode(open(os.path.join(HERE, n), "rb").read()).decode() for n in ("setup.sh", "free_worker.py", "tts_chatterbox.py", "avatar_sadtalker.py")}
+# Ship the whole worker directory (runtime, plugins, adapters) as one zip inside the kernel.
+buf = io.BytesIO()
+with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+    for root, _, names in os.walk(HERE):
+        for n in names:
+            if "__pycache__" in root or n.endswith(".pyc"):
+                continue
+            full = os.path.join(root, n)
+            z.write(full, os.path.relpath(full, HERE))
+bundle = base64.b64encode(buf.getvalue()).decode()
 env = {
     "APP_URL": os.environ["APP_URL"],
     "WORKER_SECRET": os.environ["WORKER_SECRET"],
-    "WORKER_KINDS": os.environ.get("WORKER_KINDS", "avatar"),
+    "WORKER_KINDS": os.environ.get("WORKER_KINDS", "lipsync,avatar"),
+    "WORKER_PLUGINS": os.environ.get("WORKER_PLUGINS", "latentsync sadtalker"),
     "IDLE_EXIT_SEC": os.environ.get("IDLE_EXIT_SEC", "600"),
     "MAX_RUNTIME_SEC": os.environ.get("MAX_RUNTIME_SEC", "30000"),
     "WORKER_NAME": "kaggle-gpu",
     "WORKER_HOME": "/kaggle/working/w",
     "SADTALKER_BATCH": "16",
+    "LATENTSYNC_VERSION": "1.5",  # 8 GB — fits Kaggle's 16 GB T4
 }
 script = f'''
-import base64, os, subprocess
-os.makedirs("/kaggle/working/worker", exist_ok=True)
-for name, data in {files!r}.items():
-    open(f"/kaggle/working/worker/{{name}}", "wb").write(base64.b64decode(data))
+import base64, io, os, subprocess, zipfile
+zipfile.ZipFile(io.BytesIO(base64.b64decode("{bundle}"))).extractall("/kaggle/working/worker")
 os.environ.update({env!r})
 subprocess.run(["bash", "/kaggle/working/worker/setup.sh"], check=True)
 subprocess.run(["python3", "/kaggle/working/worker/free_worker.py"], check=True)

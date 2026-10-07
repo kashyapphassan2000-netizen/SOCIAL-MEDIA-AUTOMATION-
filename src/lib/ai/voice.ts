@@ -30,7 +30,7 @@ export interface VoiceProvider {
   synthesize(text: string, ctx: VoiceContext): Promise<VoiceResult>;
   /** Async providers (self-hosted worker): queue the work and poll later instead of synthesize(). */
   submit?(text: string, ctx: VoiceContext): Promise<string>;
-  poll?(taskId: string): Promise<{ state: "pending" } | { state: "done"; url: string } | { state: "failed"; error: string }>;
+  poll?(taskId: string): Promise<{ state: "pending" } | { state: "done"; url: string; words?: WordTiming[]; engine?: string } | { state: "failed"; error: string }>;
 }
 
 const EL = "https://api.elevenlabs.io/v1";
@@ -117,9 +117,12 @@ const openaiTts: VoiceProvider = {
   },
 };
 
-/** FREE: Chatterbox (MIT licence, 23 languages incl. Hindi) on your own worker — zero API cost. */
-const freeChatterbox: VoiceProvider = {
-  name: "free-chatterbox",
+/**
+ * FREE: open-source voice clone on your own worker (VoxCPM2 / Chatterbox / any plugin you add),
+ * plus faster-whisper word timings for frame-accurate captions. Zero API cost.
+ */
+const freeVoice: VoiceProvider = {
+  name: "free-voice",
   cloned: true,
   available: (a) => freeWorkerEnabled() && !!(a.voiceRefShortUrl || a.voiceSampleUrl),
   async synthesize() {
@@ -132,10 +135,19 @@ const freeChatterbox: VoiceProvider = {
   async poll(id) {
     const t = await getTask(id);
     if (!t) return { state: "failed", error: "task expired" };
-    if (t.status === "done" && t.outputUrl) return { state: "done", url: t.outputUrl };
+    if (t.status === "done" && t.outputUrl) {
+      const words = Array.isArray(t.meta?.words) ? (t.meta!.words as WordTiming[]) : undefined;
+      return { state: "done", url: t.outputUrl, words, engine: typeof t.meta?.plugin === "string" ? (t.meta.plugin as string) : undefined };
+    }
     if (t.status === "failed") return { state: "failed", error: t.error ?? "worker failed" };
     return { state: "pending" };
   },
 };
 
-export const VOICE_REGISTRY: Record<string, VoiceProvider> = { "free-chatterbox": freeChatterbox, elevenlabs, "fal-f5": falF5, "openai-tts": openaiTts };
+export const VOICE_REGISTRY: Record<string, VoiceProvider> = {
+  "free-voice": freeVoice,
+  "free-chatterbox": freeVoice, // backwards-compatible alias
+  elevenlabs,
+  "fal-f5": falF5,
+  "openai-tts": openaiTts,
+};

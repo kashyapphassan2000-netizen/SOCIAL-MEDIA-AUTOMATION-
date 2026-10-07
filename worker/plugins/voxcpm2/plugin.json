@@ -1,0 +1,14 @@
+{
+  "id": "voxcpm2",
+  "name": "VoxCPM2 — natural multilingual voice clone (30 languages incl. Hindi)",
+  "kind": "tts",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/OpenBMB/VoxCPM",
+  "python": "3.11",
+  "torch": { "torch": "2.6.0", "torchaudio": "2.6.0" },
+  "requirements": ["voxcpm==2.0.3", "soundfile"],
+  "gpu": "optional",
+  "min_vram_gb": 8,
+  "timeout_min": 60,
+  "notes": "Most natural open voice clone in this catalog. GPU ~0.3x real time; CPU works but is slow."
+}

@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 export const POST = handle(async (req: Request) => {
   requireWorker(req);
   const body = (await req.json().catch(() => ({}))) as { kinds?: FreeTaskKind[]; worker?: string };
-  const kinds = (body.kinds?.length ? body.kinds : ["tts", "avatar"]).filter((k): k is FreeTaskKind => k === "tts" || k === "avatar");
+  const kinds = (body.kinds?.length ? body.kinds : ["tts", "lipsync", "avatar"]).filter((k): k is FreeTaskKind => k === "tts" || k === "avatar" || k === "lipsync");
   const t = await claimTask(kinds, String(body.worker ?? "worker").slice(0, 60));
   if (!t) return new Response(null, { status: 204 });
   return json({ task: t });

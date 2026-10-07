@@ -1,0 +1,17 @@
+{
+  "id": "latentsync",
+  "name": "LatentSync — diffusion lip-sync onto YOUR real clip (sharpest mouth)",
+  "kind": "lipsync",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/bytedance/LatentSync",
+  "repo": "https://github.com/bytedance/LatentSync",
+  "python": "3.10",
+  "torch": { "torch": "2.5.1", "torchvision": "0.20.1", "torchaudio": "2.5.1" },
+  "repo_requirements": "requirements.txt",
+  "requirements": ["huggingface_hub"],
+  "gpu": "required",
+  "min_vram_gb": 8,
+  "timeout_min": 90,
+  "status": "experimental — needs an NVIDIA GPU; not runnable in the CI sandbox",
+  "notes": "LATENTSYNC_VERSION=1.5 (256px, ~8 GB, fits Kaggle T4) or 1.6 (512px, ~18 GB, RTX 3090/4090)."
+}

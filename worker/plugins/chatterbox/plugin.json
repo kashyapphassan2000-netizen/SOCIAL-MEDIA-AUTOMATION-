@@ -1,0 +1,14 @@
+{
+  "id": "chatterbox",
+  "name": "Chatterbox — voice clone (23 languages incl. Hindi), CPU-friendly",
+  "kind": "tts",
+  "license": "MIT",
+  "homepage": "https://github.com/resemble-ai/chatterbox",
+  "python": "3.11",
+  "torch": { "torch": "2.6.0", "torchaudio": "2.6.0" },
+  "requirements": ["chatterbox-tts==0.1.7", "setuptools<81"],
+  "gpu": "optional",
+  "min_vram_gb": 6,
+  "timeout_min": 60,
+  "notes": "Verified: CPU ~5x slower than real time (45 s script ≈ 4-5 min on 4 cores)."
+}

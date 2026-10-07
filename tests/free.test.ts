@@ -96,12 +96,12 @@ describe("pipeline on the free stack (async voice + avatar via worker queue)", (
     process.env.WORKER_SECRET = "ws";
     delete process.env.GH_DISPATCH_TOKEN;
     const s = await getSettings();
-    await saveSettings({ ...s, generateLooks: false, voiceProviders: ["free-chatterbox"], avatarProviders: ["free-sadtalker", "still"] });
+    await saveSettings({ ...s, generateLooks: false, voiceProviders: ["free-voice"], avatarProviders: ["free-avatar", "still"] });
     const { pubs } = mockPublishers({});
     setDeps({
       llms: () => [mockLLM()],
-      voices: () => [VOICE_REGISTRY["free-chatterbox"]],
-      avatars: () => [AVATAR_REGISTRY["free-sadtalker"], AVATAR_REGISTRY.still],
+      voices: () => [VOICE_REGISTRY["free-voice"]],
+      avatars: () => [AVATAR_REGISTRY["free-avatar"], AVATAR_REGISTRY.still],
       trends: async () => ({ stories: [{ title: "Story", url: "https://e.x/a", source: "E", summary: "", hash: "z1" }], errors: [] }),
       publishers: pubs,
       generateLook: async () => Buffer.alloc(0),
@@ -139,11 +139,59 @@ describe("pipeline on the free stack (async voice + avatar via worker queue)", (
     const done = await getJob(job.id);
     expect(kinds).toEqual(["tts", "avatar"]);
     expect(done?.status).toBe("done");
-    expect(done?.data.voiceProvider).toBe("free-chatterbox");
-    expect(done?.data.avatarProvider).toBe("free-sadtalker");
+    expect(done?.data.voiceProvider).toBe("free-voice");
+    expect(done?.data.avatarProvider).toBe("free-avatar");
     expect(done?.data.audioSeconds).toBeGreaterThan(11);
     // worker outputs are ours (Blob) -> deleted after publishing
     for (const u of [done!.data.audioUrl!, done!.data.avatarUrl!]) expect(fs.existsSync(u.slice(7))).toBe(false);
+    delete process.env.WORKER_SECRET;
+  });
+
+  it("clip mode: lip-syncs onto rotating real clips and uses worker word timings for captions", async () => {
+    const { fx } = await setup();
+    process.env.WORKER_SECRET = "ws";
+    const { saveAssets, getAssets } = await import("@/lib/db");
+    await saveAssets({ ...(await getAssets()), clips: [{ url: fx.voice.replace(".mp3", "-a.mp4"), name: "studio blazer", addedAt: "" }, { url: "file:///clip-b.mp4", name: "desk tee", addedAt: "" }] });
+    const s = await getSettings();
+    await saveSettings({ ...s, avatarMode: "clip", generateLooks: false });
+    const { pubs } = mockPublishers({});
+    setDeps({
+      llms: () => [mockLLM()],
+      voices: () => [VOICE_REGISTRY["free-voice"]],
+      avatars: () => [AVATAR_REGISTRY["free-lipsync"], AVATAR_REGISTRY["free-avatar"], AVATAR_REGISTRY.still],
+      trends: async () => ({ stories: [{ title: "Story", url: "", source: "E", summary: "", hash: "z3" }], errors: [] }),
+      publishers: pubs,
+      generateLook: async () => Buffer.alloc(0),
+    });
+    const sch = schedule({ platforms: ["youtube"] });
+    await saveSchedule(sch);
+    const job = await createJob(sch, "manual", "t");
+    const { getStorage } = await import("@/lib/storage");
+    let lipsyncInput: Record<string, unknown> | null = null;
+    const timed = [{ word: "OpenAI", start: 0.1, end: 0.5 }, { word: "just", start: 0.5, end: 0.7 }];
+    for (let i = 0; i < 30; i++) {
+      await tick({ budgetSec: 280, enqueue: false });
+      const t = await claimTask(["tts", "lipsync", "avatar"], "w");
+      if (t?.kind === "tts") {
+        const out = path.join(work, `${t.id}.mp3`);
+        await runFfmpeg(["-y", "-f", "lavfi", "-i", "sine=f=220:d=9", "-c:a", "libmp3lame", out]);
+        await completeTask(t.id, { outputUrl: await getStorage().put("v.mp3", fs.readFileSync(out), "audio/mpeg"), meta: { plugin: "voxcpm2", words: timed } });
+      } else if (t?.kind === "lipsync") {
+        lipsyncInput = t.input;
+        const out = path.join(work, `${t.id}.mp4`);
+        await runFfmpeg(["-y", "-f", "lavfi", "-i", "testsrc2=s=720x1280:d=3:r=25", "-c:v", "libx264", "-pix_fmt", "yuv420p", out]);
+        await completeTask(t.id, { outputUrl: await getStorage().put("l.mp4", fs.readFileSync(out), "video/mp4") });
+      }
+      await fastForward();
+      if ((await getJob(job.id))?.stage === "done") break;
+    }
+    const done = await getJob(job.id);
+    expect(done?.status).toBe("done");
+    expect(String(lipsyncInput?.videoUrl)).toMatch(/clip-b\.mp4|-a\.mp4/);
+    expect(done?.data.avatarProvider).toBe("free-lipsync");
+    expect(done?.data.voiceProvider).toBe("free-voice/voxcpm2");
+    expect(done?.data.words).toEqual(timed);
+    expect(done?.data.lookName).toMatch(/^clip: /);
     delete process.env.WORKER_SECRET;
   });
 
@@ -155,8 +203,8 @@ describe("pipeline on the free stack (async voice + avatar via worker queue)", (
     const { pubs } = mockPublishers({});
     setDeps({
       llms: () => [mockLLM()],
-      voices: () => [VOICE_REGISTRY["free-chatterbox"]],
-      avatars: () => [AVATAR_REGISTRY["free-sadtalker"], AVATAR_REGISTRY.still],
+      voices: () => [VOICE_REGISTRY["free-voice"]],
+      avatars: () => [AVATAR_REGISTRY["free-avatar"], AVATAR_REGISTRY.still],
       trends: async () => ({ stories: [{ title: "Story", url: "", source: "E", summary: "", hash: "z2" }], errors: [] }),
       publishers: pubs,
       generateLook: async () => Buffer.alloc(0),

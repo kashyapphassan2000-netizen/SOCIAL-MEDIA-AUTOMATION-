@@ -61,6 +61,11 @@ export async function hasAudioStream(file: string): Promise<boolean> {
   return /Stream #\d+:\d+.*Audio:/.test(out);
 }
 
+export async function hasVideoStream(file: string): Promise<boolean> {
+  const out = await runFfmpeg(["-i", file, "-f", "null", "-t", "0", "-"]).catch((e: Error) => e.message);
+  return /Stream #\d+:\d+.*Video:/.test(out) && !/Video: (mjpeg|png).*attached pic/.test(out);
+}
+
 export function tmpDir(prefix = "sa-"): string {
   return fs.mkdtempSync(path.join(/*turbopackIgnore: true*/ os.tmpdir(), prefix));
 }
