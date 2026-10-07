@@ -102,7 +102,8 @@ export async function dispatchWorker(kind: FreeTaskKind): Promise<boolean> {
   await http(`https://api.github.com/repos/${repo}/actions/workflows/${process.env.GITHUB_WORKER_WORKFLOW || "free-worker.yml"}/dispatches`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json" },
-    body: JSON.stringify({ ref: process.env.GITHUB_WORKER_REF || "main", inputs: { kinds: kind } }),
+    // Vercel exposes the deployed branch; the workflow must be dispatched on a branch that contains it.
+    body: JSON.stringify({ ref: process.env.GITHUB_WORKER_REF || process.env.VERCEL_GIT_COMMIT_REF || "main", inputs: { kinds: kind } }),
     retries: 1,
   });
   return true;

@@ -175,7 +175,7 @@ function JobCard({ j, open, toggle, t, reload }: { j: Job; open: boolean; toggle
 // ---------------------------------------------------------------- Schedules
 const emptySchedule = (): Omit<Schedule, "id" | "createdBy" | "createdAt" | "updatedAt"> => ({
   name: "AI News", topic: "AI news", instructions: "", queries: [], language: "en", everyHours: 1, windowStartHour: 8, windowEndHour: 23,
-  platforms: [...PLATFORMS], targetSeconds: 45, publishMode: "private", enabled: true,
+  platforms: [...PLATFORMS], targetSeconds: 32, publishMode: "private", enabled: true, seriesName: "",
 });
 
 function Schedules({ user, t }: { user: Session; t: Toast }) {
@@ -216,7 +216,8 @@ function Schedules({ user, t }: { user: Session; t: Toast }) {
             <div><label>Every (hours)</label><input type="number" min={1} max={168} value={edit.everyHours} onChange={(e) => setEdit({ ...edit, everyHours: Number(e.target.value) })} /></div>
             <div><label>Window start (hour)</label><input type="number" min={0} max={23} value={edit.windowStartHour} onChange={(e) => setEdit({ ...edit, windowStartHour: Number(e.target.value) })} /></div>
             <div><label>Window end (hour)</label><input type="number" min={0} max={23} value={edit.windowEndHour} onChange={(e) => setEdit({ ...edit, windowEndHour: Number(e.target.value) })} /></div>
-            <div><label>Length (sec)</label><input type="number" min={20} max={58} value={edit.targetSeconds} onChange={(e) => setEdit({ ...edit, targetSeconds: Number(e.target.value) })} /></div>
+            <div><label>Length (sec, 28–35 retains best)</label><input type="number" min={20} max={58} value={edit.targetSeconds} onChange={(e) => setEdit({ ...edit, targetSeconds: Number(e.target.value) })} /></div>
+            <div><label>Series name (optional, e.g. “AI in 30”)</label><input value={edit.seriesName ?? ""} onChange={(e) => setEdit({ ...edit, seriesName: e.target.value })} /></div>
             <div><label>Language</label><input value={edit.language} onChange={(e) => setEdit({ ...edit, language: e.target.value })} /></div>
           </div>
           <p className="muted small">Window start = end means 24h. Times use the brand timezone.</p>
@@ -273,7 +274,7 @@ function Studio({ t, owner }: { t: Toast; owner: boolean }) {
     api("/api/settings").then((r) => setSettings(r.settings)).catch(t.err);
   }, [t.err]);
   useEffect(() => { load(); }, [load]);
-  async function send(kind: "photo" | "clip", file: File) {
+  async function send(kind: "photo" | "clip" | "performance", file: File) {
     setBusy(kind);
     try {
       let r;
@@ -311,6 +312,22 @@ function Studio({ t, owner }: { t: Toast; owner: boolean }) {
             <input type="file" accept="video/*,audio/*" hidden disabled={!!busy} onChange={(e) => e.target.files?.[0] && send("clip", e.target.files[0])} />
           </label>
         </div>
+      </div>
+      <div className="card">
+        <h3>3. Performance clips — the most natural option</h3>
+        <p className="muted small">10–60 s of you talking on camera with natural hand movement (say anything — words don’t matter, the mouth is re-synced). Vertical, face clearly visible, steady framing. Record 3–5 in different outfits/places: each is a brand look. The worker lip-syncs every new script onto them, so the body, hands and background are 100% real.</p>
+        <div className="row" style={{ alignItems: "flex-start" }}>
+          {(a?.assets.clips ?? []).map((c) => (
+            <div key={c.url} style={{ flex: "0 0 140px" }}>
+              {c.url.startsWith("file://") ? <div className="preview" /> : <video src={c.url} className="preview" muted playsInline loop onMouseOver={(e) => e.currentTarget.play()} />}
+              <div className="small"><b>{c.name}</b></div>
+              <button className="danger" onClick={async () => { if (!confirm("Remove this clip?")) return; try { await api(`/api/studio/assets?clip=${encodeURIComponent(c.url)}`, { method: "DELETE" }); load(); } catch (e) { t.err(e); } }}>Remove</button>
+            </div>
+          ))}
+        </div>
+        <label className="btn primary" style={{ marginTop: 10 }}>{busy === "performance" ? "Uploading…" : "Add performance clip"}
+          <input type="file" accept="video/*" hidden disabled={!!busy} onChange={(e) => e.target.files?.[0] && send("performance", e.target.files[0])} />
+        </label>
       </div>
       {settings && (
         <div className="card">
@@ -458,19 +475,32 @@ function Settings({ t }: { t: Toast }) {
       <div className="card">
         <h3>Production</h3>
         <div className="row">
-          <div><label>Avatar mode</label><select value={s.avatarMode} onChange={(e) => set({ avatarMode: e.target.value as "photo" | "clip" })}><option value="photo">Photo → talking video (supports outfit looks)</option><option value="clip">Re-lip-sync my recorded clip (most realistic motion)</option></select></div>
+          <div><label>Avatar mode</label><select value={s.avatarMode} onChange={(e) => set({ avatarMode: e.target.value as "photo" | "clip" })}><option value="clip">Lip-sync onto my real performance clips (most natural — recommended)</option><option value="photo">Photo → talking video (AI body motion)</option></select></div>
           <div><label>YouTube privacy (live mode)</label><select value={s.youtubePrivacy} onChange={(e) => set({ youtubePrivacy: e.target.value as BrandSettings["youtubePrivacy"] })}><option>public</option><option>unlisted</option><option>private</option></select></div>
           <div><label>YouTube category id</label><input value={s.youtubeCategoryId} onChange={(e) => set({ youtubeCategoryId: e.target.value })} /></div>
         </div>
         <label><input type="checkbox" style={{ width: "auto" }} checked={s.allowStillImageFallback} onChange={(e) => set({ allowStillImageFallback: e.target.checked })} /> If every avatar service fails, publish an animated still photo (no lip-sync) instead of skipping</label>
         <label><input type="checkbox" style={{ width: "auto" }} checked={s.allowGenericVoiceFallback} onChange={(e) => set({ allowGenericVoiceFallback: e.target.checked })} /> If voice cloning fails, use a generic AI voice (NOT your voice — brand risk)</label>
-        <label>Avatar providers (tap to toggle, order = priority)</label>{order("avatarProviders", opts.avatar.filter((x) => x !== "fal-lipsync-clip"))}
-        <label>Voice providers</label>{order("voiceProviders", opts.voice.filter((x) => x !== "openai-tts"))}
+        <label>Avatar providers (tap to toggle, order = priority)</label>{order("avatarProviders", opts.avatar.filter((x) => !["fal-lipsync-clip", "free-lipsync", "free-sadtalker"].includes(x)))}
+        <label>Voice providers</label>{order("voiceProviders", opts.voice.filter((x) => !["openai-tts", "free-chatterbox"].includes(x)))}
         <label>Script AI providers</label>{order("llmProviders", opts.llm)}
         <div className="row">
           <div><label>Background music URL (royalty-free mp3, optional)</label><input value={s.musicUrl} onChange={(e) => set({ musicUrl: e.target.value })} /></div>
           <div style={{ flex: "0 1 140px" }}><label>Music volume</label><input type="number" step={0.01} min={0} max={1} value={s.musicVolume} onChange={(e) => set({ musicVolume: Number(e.target.value) })} /></div>
         </div>
+      </div>
+      <div className="card">
+        <h3>Brand engine</h3>
+        <label>Brand promise (one line — steers every script)</label>
+        <input value={s.brandPromise} placeholder="Practical AI news that makes Indian professionals faster at work" onChange={(e) => set({ brandPromise: e.target.value })} />
+        <label>Spoken signature (last line of every video — brand recall)</label>
+        <input value={s.signature} placeholder="I'm Kashyap. Follow for your daily AI edge." onChange={(e) => set({ signature: e.target.value })} />
+        <label>Brand hashtag (added to every post on every platform, without #)</label>
+        <input value={s.brandHashtag} placeholder="KashyapAI" onChange={(e) => set({ brandHashtag: e.target.value.replace(/[^\p{L}\p{N}_]/gu, "") })} />
+        <label><input type="checkbox" style={{ width: "auto" }} checked={s.broll} onChange={(e) => set({ broll: e.target.checked })} /> B-roll cutaways (Pexels/Pixabay keys = real footage; otherwise free AI stills)</label>
+        <label><input type="checkbox" style={{ width: "auto" }} checked={s.punchIns} onChange={(e) => set({ punchIns: e.target.checked })} /> Punch-in jump cuts on every other sentence</label>
+        <label><input type="checkbox" style={{ width: "auto" }} checked={s.sfx} onChange={(e) => set({ sfx: e.target.checked })} /> Whoosh sound on cuts</label>
+        <label><input type="checkbox" style={{ width: "auto" }} checked={s.firstComment} onChange={(e) => set({ firstComment: e.target.checked })} /> Post a question as the first comment (YouTube/Instagram; pin it manually)</label>
       </div>
       <div className="card">
         <h3>Google Sheet log</h3>

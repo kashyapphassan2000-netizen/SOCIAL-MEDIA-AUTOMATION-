@@ -33,6 +33,46 @@ No AI provider gives *unlimited* free access. Every free tier has a rate or dail
 
 ---
 
+## Natural output: the 2026 open-source model map (what's used and why)
+
+Researched across GitHub / Hugging Face / papers (Oct 2026). Only **commercially usable licences** are wired in. "Verified" = actually run in this repo's CI sandbox (CPU); "experimental" = adapter written to the repo's documented commands, needs your NVIDIA GPU to confirm.
+
+| Job | Plugin (default order) | Licence | Needs | Verdict |
+|---|---|---|---|---|
+| Voice clone | **voxcpm2** (OpenBMB VoxCPM2, 30 langs incl. Hindi) | Apache-2.0 | GPU ≥8 GB (CPU works, ~12× slower than real time) | Most natural open voice here. Verified on CPU: transcribes back word-for-word. |
+| Voice clone | **chatterbox** (Resemble AI, 23 langs incl. Hindi) | MIT | CPU OK (~5× real time) | Default on CPU. Verified. |
+| Caption timing | **faster-whisper** | MIT | CPU OK (~5–10 s) | Word-exact karaoke captions. Verified. |
+| Lip-sync on **your real clip** | **latentsync** (ByteDance LatentSync 1.5/1.6) | Apache-2.0 | GPU 8 GB (1.5) / 18 GB (1.6) | **Most natural overall:** real body, real hands, only the mouth is AI. Experimental. |
+| Lip-sync on your real clip | **musetalk** (MuseTalk 1.5) | MIT | GPU ≥6 GB, near real time | Faster, slightly softer mouth. Experimental (install pins torch 2.0 + mmcv). |
+| Photo → half body **with hand gestures** | **echomimicv3-flash** (Ant Group EchoMimicV3) | Apache-2.0 | GPU ≥12 GB | Best open gesture model that fits consumer GPUs. Slow (paper: 5 s ≈ 4 min on an A100). Experimental. |
+| Photo → talking head | **sadtalker** | MIT | CPU OK but ~2 min per second of video | Verified. Face only, no hands. Last-resort free avatar. |
+
+**Considered and rejected:** InfiniteTalk / Wan-S2V / OmniAvatar (14B, need 24–80 GB VRAM), LiveAvatar (48–80 GB), LongCat-Video-Avatar 1.5 (MIT, but multi-GPU). Higgs Audio, Fish-Speech/OpenAudio, XTTS-v2 and F5-TTS weights are **non-commercial**. IndexTTS2 has a custom bilibili licence. Wav2Lip is non-commercial. NVIDIA Audio2Face-2D is evaluation-only. HF ZeroGPU gives ~3 runs/day.
+
+**The blunt truth about "100% natural, free, unlimited":**
+* *Natural* free video = **your real footage + AI lip-sync.** Record 3–5 "performance clips" once (10–60 s each, talking with natural gestures, different outfits). Every video after that has real hands and real body language. Fully AI-generated gestures from one photo (EchoMimicV3) look good in demos but still drift on hands and are slow.
+* *Free + unlimited* exists only on **your own GPU** (the Studio app). Free cloud GPUs are quotas: Kaggle ~30 GPU-h/week, Colab 15–30 h/week (not automatable), Lightning ~80 h/month, Modal $30/month credits. Rough capacity on Kaggle T4: ~30 s lip-sync = a few minutes, so dozens per week; EchoMimicV3 = tens of minutes each, so a handful per week.
+* *Recommended hardware* for unlimited natural output: an NVIDIA RTX 3060 12 GB (minimum) up to an RTX 4090 24 GB. Run the Studio app with the worker started.
+* You cannot *force* any algorithm. What moves Shorts/Reels distribution is: viewers not swiping in the first 2 s, high completion/replays, comments, and consistency of a recognisable format. That is what the brand engine below optimises.
+
+### Brand engine (what makes the algorithm pick you up)
+* **28–35 s scripts** (default 32 s; most high performers in 2026 sit at 25–35 s) with an enforced structure: a 0–2 s hook (≤10 words), stakes, 2–3 beats with a mid-video re-hook, your own opinion (protects monetisation), then a **loop ending** that flows back into the first line.
+* **Rotating proven hook styles** (contrarian, number, "you", curiosity, warning, breaking, micro-story). A **performance loop** pulls real views/likes/comments 20 h–10 days after posting, writes a *Performance* tab in your sheet, and tells the writer which hook styles, titles and topics *your* audience rewards (70% exploit / 30% explore).
+* **Series format** ("AI in 30 #12: …"), a **spoken signature** at the end of every video, your **brand hashtag** on every post on every platform, and consistent colours, captions, watermark and end card. Recognition is what turns views into followers.
+* **Human-style editing:** punch-in jump cuts on alternate sentences, 2–3 B-roll cutaways (Pexels/Pixabay free keys, else free Pollinations AI stills), synthesized whoosh on cuts, emphasis words highlighted in captions. Your face stays on screen ≥75% of the time.
+* **First comment** (a question) posted automatically on YouTube and Instagram. Early comments are a ranking signal. APIs cannot pin comments.
+
+### Studio: the Windows app (`.exe`)
+`ShortsAutopilotStudio-Setup.exe` is built by GitHub Actions on every push (workflow **studio-windows** → run → *Artifacts*), or attached to a Release when you push a tag `studio-v1.0.0`. It installs per-user (no admin) and bundles `uv` (installs Python automatically) and ffmpeg.
+* **Models tab:** install / test / remove plugins, and set the order per kind (first = default, the rest are automatic fallbacks).
+* **Paste any GitHub or Hugging Face link:** a free LLM reads the README and drafts `plugin.json` + `adapter.py` for the standard contract. You review/edit, Install, Test. Honest limit: it only works when the README documents the inference command and weights. Otherwise the adapter stops with a TODO instead of guessing.
+* **A/B compare on your own face and voice:** run every installed voice / lip-sync / avatar plugin on the same input and keep the winner.
+* **Local worker:** one click, and your PC renders the app's queued tasks (GPU if present). Turn on "start with Studio" and leave it running.
+* **WSL2 mode:** many GPU repos (flash-attn, mmcv, deepspeed) don't install on native Windows. Tick *Run plugins inside WSL2* and Studio runs them in Ubuntu with your NVIDIA GPU.
+* Mac/Linux: `node studio/main.cjs` (or `node studio/build.mjs` for a single binary).
+
+---
+
 ## Brutal honesty: platforms and money
 
 | Topic | Reality |
@@ -107,9 +147,9 @@ Vercel cron (daily backup) ────┘      ▲   │          │ per job, 
 
 ## Setup (do these in order; about 1–2 hours)
 
-### 1. Deploy
-1. Merge this branch into your default branch (`main`). GitHub only runs scheduled workflows from the default branch.
-2. vercel.com → **Add New Project** → import this repo (framework: Next.js, defaults are fine).
+### 1. Deploy (Vercel)
+1. This branch is currently the repo's **default branch** (it's the only branch), so GitHub's scheduled workflows already run from it. If you later merge into `main` and make `main` the default, set `GITHUB_WORKER_REF=main`.
+2. Open **https://vercel.com/new/import?s=https://github.com/kashyapphassan2000-netizen/SOCIAL-MEDIA-AUTOMATION-** → Import (framework Next.js, defaults are fine). Vercel deploys the default branch to production.
 3. Vercel → project → **Storage**:
    * **Upstash Redis** (Marketplace) → connect to the project. This fills `KV_REST_API_URL` / `KV_REST_API_TOKEN`.
    * **Blob** → create store → connect. This fills `BLOB_READ_WRITE_TOKEN`.
@@ -190,7 +230,7 @@ linkedin.com/developers → Create app (needs a company page to associate) → *
 npm install
 cp .env.example .env.local     # fill what you have; without Redis/Blob it uses local disk
 npm run dev                    # http://localhost:3000
-npm test                       # 45 tests: full pipeline with real ffmpeg renders, failure injection, free-worker queue, every platform's API contract
+npm test                       # 51 tests: full pipeline with real ffmpeg renders, failure injection, free-worker queue, natural edit, learning loop, every platform's API contract
 npm run tick                   # run one worker pass from your machine (same Redis/Blob/creds)
 npm run worker                 # keep a worker running (fallback if Vercel is unavailable)
 ```

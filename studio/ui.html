@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Autopilot Studio</title>
+<style>
+:root { --bg:#0b0f17; --panel:#121826; --p2:#182033; --line:#243049; --text:#e8edf6; --muted:#8d9ab3; --accent:#ffd60a; --ok:#2ecc71; --bad:#ff5d5d; --warn:#f5a524; }
+@media (prefers-color-scheme: light) { :root { --bg:#f5f7fb; --panel:#fff; --p2:#eef2f8; --line:#dbe2ee; --text:#0f1726; --muted:#5b6880; } }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+header { display:flex; gap:12px; align-items:center; padding:12px 16px; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--bg); z-index:5; }
+header b { font-size:16px; } header i { width:22px; height:22px; background:var(--accent); border-radius:6px; display:inline-block; }
+main { display:grid; grid-template-columns: minmax(0,1fr) 420px; gap:16px; padding:16px; max-width:1400px; margin:0 auto; }
+@media (max-width: 1000px) { main { grid-template-columns: 1fr; } }
+section { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:14px; }
+h2 { font-size:15px; margin:0 0 10px; } h3 { font-size:13px; margin:12px 0 6px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+button { background:var(--p2); color:var(--text); border:1px solid var(--line); border-radius:9px; padding:6px 11px; font:inherit; font-weight:600; cursor:pointer; }
+button.p { background:var(--accent); color:#111; border-color:var(--accent); } button.d { color:var(--bad); } button:disabled { opacity:.5; }
+input, select, textarea { width:100%; background:var(--p2); color:var(--text); border:1px solid var(--line); border-radius:9px; padding:7px 9px; font:inherit; }
+textarea { font-family:ui-monospace,Menlo,monospace; font-size:12px; min-height:160px; }
+label { font-size:12px; color:var(--muted); display:block; margin:8px 0 3px; }
+.row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; } .row > * { flex:1 1 160px; min-width:0; } .row > button { flex:0 0 auto; }
+table { width:100%; border-collapse:collapse; } td { padding:7px 4px; border-bottom:1px solid var(--line); vertical-align:top; }
+.tag { font-size:11px; padding:1px 7px; border-radius:99px; border:1px solid var(--line); white-space:nowrap; }
+.ok { color:var(--ok); } .bad { color:var(--bad); } .warn { color:var(--warn); } .muted { color:var(--muted); } .small { font-size:12px; }
+.log { background:var(--bg); border:1px solid var(--line); border-radius:10px; font:11.5px/1.45 ui-monospace,Menlo,monospace; padding:8px; height:340px; overflow:auto; white-space:pre-wrap; word-break:break-word; }
+.out video, .out audio { width:100%; max-height:420px; border-radius:10px; background:#000; }
+.grid2 { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px; }
+.card { border:1px solid var(--line); border-radius:10px; padding:8px; }
+</style>
+</head>
+<body>
+<header><i></i><b>Autopilot Studio</b><span class="muted small" id="env"></span></header>
+<main>
+<div>
+  <section>
+    <h2>1 · Connect to your app</h2>
+    <div class="row">
+      <div><label>App URL</label><input id="appUrl" placeholder="https://your-app.vercel.app"></div>
+      <div><label>Worker secret (same as WORKER_SECRET in Vercel)</label><input id="workerSecret" type="password"></div>
+    </div>
+    <div class="row">
+      <div><label>Gemini key (optional, for drafting plugins offline)</label><input id="geminiKey" type="password"></div>
+      <div><label>Groq key (optional)</label><input id="groqKey" type="password"></div>
+    </div>
+    <div class="row">
+      <div><label>Models folder</label><input id="workerHome"></div>
+      <div><label>Task kinds this PC renders</label><input id="kinds"></div>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <label style="flex:0 0 auto"><input type="checkbox" id="useWsl" style="width:auto"> Run plugins inside WSL2 (recommended on Windows for GPU models)</label>
+      <label style="flex:0 0 auto"><input type="checkbox" id="autoStartWorker" style="width:auto"> Start worker when Studio opens</label>
+      <button class="p" onclick="saveCfg()">Save</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>2 · Models (plugins)</h2>
+    <p class="muted small">Each kind tries plugins top-to-bottom and falls back on failure. ↑/↓ changes the order. <b>verified</b> = tested by the project; <b>experimental</b> = needs your GPU to confirm; <b>drafted</b> = written by AI from a README — test before trusting.</p>
+    <div id="plugins">Loading…</div>
+  </section>
+
+  <section>
+    <h2>3 · Add any open-source model from GitHub</h2>
+    <div class="row">
+      <div style="flex:3 1 300px"><label>GitHub (or Hugging Face) repo link</label><input id="ghUrl" placeholder="https://github.com/owner/new-voice-clone-model"></div>
+      <div><label>What it does</label><select id="ghKind"><option value="tts">tts — voice clone</option><option value="lipsync">lipsync — re-lip-sync my real clip</option><option value="avatar">avatar — photo to talking video</option><option value="align">align — word timings</option></select></div>
+      <button class="p" onclick="draft()">Draft plugin</button>
+    </div>
+    <p class="muted small">A free LLM reads the README and writes an adapter to the standard contract. It cannot guess things the README doesn't say — if a step is unknown the adapter stops with a TODO. Review, edit, then Install → Test.</p>
+    <div id="review" style="display:none">
+      <h3>Review drafted plugin: <span id="revId"></span></h3>
+      <label>plugin.json</label><textarea id="revManifest"></textarea>
+      <label>adapter.py</label><textarea id="revAdapter" style="min-height:260px"></textarea>
+      <label>setup.py (optional)</label><textarea id="revSetup"></textarea>
+      <div class="row" style="margin-top:8px"><button onclick="saveReview()">Save edits</button><button class="p" onclick="act('install',{id:revId.textContent})">Install</button><button onclick="act('test',{id:revId.textContent, ...inputs})">Test</button></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>4 · A/B compare on YOUR face and voice</h2>
+    <p class="muted small">Upload your own inputs, then compare every installed plugin of a kind side by side. Pick the winner with ↑.</p>
+    <div class="grid2">
+      <div class="card"><label>Your photo</label><input type="file" accept="image/*" onchange="up(this,'image')"><div class="small muted" id="in-image">sample portrait</div></div>
+      <div class="card"><label>Your voice reference (10-20 s)</label><input type="file" accept="audio/*,video/*" onchange="up(this,'ref')"><div class="small muted" id="in-ref">sample voice</div></div>
+      <div class="card"><label>Your performance clip (for lip-sync)</label><input type="file" accept="video/*" onchange="up(this,'video')"><div class="small muted" id="in-video">still from photo</div></div>
+      <div class="card"><label>Test sentence</label><input id="testText" value="This is my AI clone. Tell me honestly, does it sound and look like me?"><label>Language</label><input id="testLang" value="en"></div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button class="p" onclick="act('compare',{kind:'tts', ...inputs})">Compare voices</button>
+      <button class="p" onclick="act('compare',{kind:'lipsync', ...inputs})">Compare lip-sync</button>
+      <button class="p" onclick="act('compare',{kind:'avatar', ...inputs})">Compare avatars</button>
+    </div>
+    <div class="grid2 out" id="outputs" style="margin-top:10px"></div>
+  </section>
+</div>
+
+<div>
+  <section>
+    <h2>Local worker</h2>
+    <p class="muted small">Renders your app's queued tasks on this PC (GPU if present). Leave it running; it picks up work as schedules fire.</p>
+    <div class="row"><button class="p" onclick="worker('start')">Start</button><button class="d" onclick="worker('stop')">Stop</button><span id="wstate" class="small muted"></span></div>
+  </section>
+  <section>
+    <h2>Activity <span class="muted small" id="jobTitle"></span></h2>
+    <div class="row" style="margin-bottom:6px"><select id="jobSel" onchange="watch(this.value)"></select></div>
+    <div class="log" id="log"></div>
+  </section>
+  <section class="small muted" id="sys"></section>
+</div>
+</main>
+<script>
+const T = "__TOKEN__";
+const $ = (id) => document.getElementById(id);
+const inputs = {};
+const api = async (p, opt = {}) => {
+  const r = await fetch(p, { ...opt, headers: { "x-studio-token": T, ...(opt.body && !(opt.body instanceof Blob) ? { "Content-Type": "application/json" } : {}), ...(opt.headers || {}) } });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+};
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+async function status() {
+  const s = await api("/api/status");
+  for (const k of ["appUrl", "workerSecret", "geminiKey", "groqKey", "workerHome", "kinds"]) $(k).value = s.cfg[k] || "";
+  $("useWsl").checked = !!s.cfg.useWsl; $("autoStartWorker").checked = !!s.cfg.autoStartWorker;
+  $("env").textContent = `${s.gpu ? "GPU: " + s.gpu : "no NVIDIA GPU (CPU mode — voice OK, avatars slow)"} · ${s.platform}`;
+  $("sys").innerHTML = `python: ${esc(s.python)}<br>uv: ${esc(s.uv || "missing")}<br>ffmpeg: ${s.ffmpeg ? "ok" : "<span class=bad>missing</span>"} · git: ${s.git ? "ok" : "not needed (zip fallback)"}${s.wsl !== null ? " · WSL: " + (s.wsl ? "ok" : "not installed") : ""}<br>data: ${esc(s.data)}`;
+  $("wstate").textContent = s.worker?.running ? "running" : "stopped";
+}
+async function saveCfg() {
+  const b = {}; for (const k of ["appUrl", "workerSecret", "geminiKey", "groqKey", "workerHome", "kinds"]) b[k] = $(k).value.trim();
+  b.useWsl = $("useWsl").checked; b.autoStartWorker = $("autoStartWorker").checked;
+  await api("/api/config", { method: "POST", body: JSON.stringify(b) }); status(); plugins();
+}
+async function plugins() {
+  try {
+    const d = await api("/api/plugins");
+    let html = "";
+    for (const kind of ["tts", "lipsync", "avatar", "align"]) {
+      const order = d.order[kind] || [];
+      const rows = d.plugins.filter((p) => p.kind === kind).sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+      html += `<h3>${kind}</h3><table>` + rows.map((p) => `<tr>
+        <td style="width:28px">${order.indexOf(p.id) + 1 || "–"}</td>
+        <td><b>${esc(p.name || p.id)}</b><br><span class="small muted">${esc(p.id)} · ${esc(p.license || "?")} · GPU ${esc(p.gpu)}${p.min_vram_gb ? " ≥" + p.min_vram_gb + " GB" : ""}${p.homepage ? ` · <a href="${esc(p.homepage)}" target=_blank>repo</a>` : ""}</span><br>
+          <span class="tag ${p.installed ? "ok" : ""}">${p.installed ? "installed" : "not installed"}</span> <span class="tag ${/experimental|drafted/.test(p.status) ? "warn" : "ok"}">${esc((p.status || "").split(" — ")[0] || "built-in")}</span>
+          <div class="small muted">${esc(p.notes || "")}</div></td>
+        <td style="white-space:nowrap;text-align:right">
+          <button onclick="move('${kind}','${p.id}',-1)">↑</button><button onclick="move('${kind}','${p.id}',1)">↓</button>
+          ${p.installed ? `<button onclick="act('test',{id:'${p.id}', ...inputs})">Test</button><button class="d" onclick="act('uninstall',{id:'${p.id}'})">Remove</button>` : `<button class="p" onclick="act('install',{id:'${p.id}'})">Install</button>`}
+          ${p.builtin ? "" : `<button onclick="review('${p.id}')">Edit</button>`}
+        </td></tr>`).join("") + "</table>";
+      window._order = d.order;
+    }
+    $("plugins").innerHTML = html;
+  } catch (e) { $("plugins").innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+}
+async function move(kind, id, dir) {
+  const o = [...(window._order[kind] || [])]; const i = o.indexOf(id); const j = i + dir;
+  if (i < 0 || j < 0 || j >= o.length) return; [o[i], o[j]] = [o[j], o[i]];
+  await act("order", { kind, ids: o }); setTimeout(plugins, 800);
+}
+async function act(action, b) {
+  if (b.text === undefined && (action === "test" || action === "compare")) { b.text = $("testText").value; b.lang = $("testLang").value; }
+  const r = await api("/api/run", { method: "POST", body: JSON.stringify({ action, ...b }) });
+  await jobsList(); $("jobSel").value = r.job; watch(r.job);
+}
+async function draft() {
+  const url = $("ghUrl").value.trim(); if (!url) return;
+  const r = await api("/api/run", { method: "POST", body: JSON.stringify({ action: "draft", url, kind: $("ghKind").value }) });
+  await jobsList(); $("jobSel").value = r.job; watch(r.job, (res) => res && res.id && review(res.id));
+}
+async function review(id) {
+  const s = await api("/api/plugin-source?id=" + encodeURIComponent(id));
+  $("review").style.display = ""; $("revId").textContent = id;
+  $("revManifest").value = s.manifest; $("revAdapter").value = s.adapter; $("revSetup").value = s.setup; plugins();
+}
+async function saveReview() {
+  await api("/api/plugin-source?id=" + encodeURIComponent($("revId").textContent), { method: "POST", body: JSON.stringify({ manifest: $("revManifest").value, adapter: $("revAdapter").value, setup: $("revSetup").value }) });
+  plugins();
+}
+async function up(el, kind) {
+  const f = el.files[0]; if (!f) return;
+  const ext = (f.name.split(".").pop() || "bin").toLowerCase();
+  const r = await api(`/api/upload?kind=${kind}&ext=${ext}`, { method: "POST", body: f });
+  inputs[kind] = r.path; $("in-" + kind).textContent = f.name;
+}
+async function worker(action) {
+  try { const r = await api("/api/worker", { method: "POST", body: JSON.stringify({ action }) }); if (r.job) { await jobsList(); $("jobSel").value = r.job; watch(r.job); } }
+  catch (e) { alert(e.message); }
+  status();
+}
+async function jobsList() {
+  const js = await api("/api/jobs");
+  $("jobSel").innerHTML = js.map((j) => `<option value="${j.id}">${j.done ? (j.code === 0 ? "✓" : "✗") : "…"} ${esc(j.title)}</option>`).join("");
+}
+let es;
+function watch(id, onDone) {
+  if (es) es.close(); $("log").textContent = "";
+  es = new EventSource(`/api/jobs/${id}/stream?t=${T}`);
+  es.onmessage = (e) => { const { line } = JSON.parse(e.data); $("log").textContent += line + "\n"; $("log").scrollTop = 1e9; };
+  es.addEventListener("done", (e) => {
+    const { code, result } = JSON.parse(e.data); es.close(); jobsList(); plugins();
+    $("log").textContent += code === 0 ? "\n✓ finished\n" : `\n✗ failed (exit ${code})\n`;
+    showResult(result); onDone && onDone(result);
+  });
+}
+function media(p) {
+  const src = `/api/file?t=${T}&path=${encodeURIComponent(p)}`;
+  return p.endsWith(".mp4") ? `<video src="${src}" controls playsinline></video>` : p.endsWith(".wav") || p.endsWith(".mp3") ? `<audio src="${src}" controls></audio>` : `<a href="${src}" target=_blank>${esc(p)}</a>`;
+}
+function showResult(r) {
+  if (!r) return;
+  const list = r.results || (r.output ? [r] : []);
+  if (!list.length) return;
+  $("outputs").innerHTML = list.map((x) => `<div class="card"><b>${esc(x.id)}</b> <span class="small ${x.ok ? "ok" : "bad"}">${x.ok ? x.seconds + " s" : esc(x.error || "failed")}</span>${x.output ? media(x.output) : ""}</div>`).join("");
+}
+status(); plugins(); jobsList();
+setInterval(status, 15000);
+</script>
+</body>
+</html>

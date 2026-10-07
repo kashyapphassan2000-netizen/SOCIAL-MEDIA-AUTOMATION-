@@ -193,11 +193,10 @@ def install(pid, force=False):
     torch = m.get("torch") or {}
     if torch:
         sh([u, "pip", "install", "-q", "--python", py, "--index-url", tindex, *[f"{k}=={v}" for k, v in torch.items()]], env=env)
+    # huggingface_hub first: weights downloads + git-less repo fetching on fresh Windows machines.
+    sh([u, "pip", "install", "-q", "--python", py, "huggingface_hub"], env=env)
     if m.get("repo"):
-        rd = repo_dir(pid)
-        if not os.path.isdir(os.path.join(rd, ".git")):
-            os.makedirs(os.path.dirname(rd), exist_ok=True)
-            sh(["git", "clone", "--depth", "1", *(["--branch", m["repo_ref"]] if m.get("repo_ref") else []), m["repo"], rd], env={"GIT_LFS_SKIP_SMUDGE": "1"})
+        fetch_repo(m, py)
     reqs = list(m.get("requirements") or [])
     if m.get("repo_requirements") and os.path.exists(os.path.join(repo_dir(pid), m["repo_requirements"])):
         reqs += ["-r", os.path.join(repo_dir(pid), m["repo_requirements"])]
@@ -210,6 +209,39 @@ def install(pid, force=False):
     open(marker(pid), "w").write(manifest_hash(m))
     log(f"{pid}: installed")
     return m
+
+
+def fetch_repo(m, py):
+    """git clone when git exists; otherwise GitHub zip / Hugging Face snapshot (no git needed)."""
+    rd = repo_dir(m["id"])
+    if os.path.isdir(rd) and os.listdir(rd):
+        return rd
+    os.makedirs(os.path.dirname(rd), exist_ok=True)
+    url = m["repo"].rstrip("/").removesuffix(".git")
+    if shutil.which("git"):
+        sh(["git", "clone", "--depth", "1", *(["--branch", m["repo_ref"]] if m.get("repo_ref") else []), url, rd], env={"GIT_LFS_SKIP_SMUDGE": "1"})
+        return rd
+    if "huggingface.co/" in url:
+        kind = "space" if "/spaces/" in url else "model"
+        rid = url.split("huggingface.co/")[1].removeprefix("spaces/")
+        sh([py, "-c", f"from huggingface_hub import snapshot_download as s; s({rid!r}, repo_type={kind!r}, local_dir={rd!r}, allow_patterns=['*.py','*.yaml','*.yml','*.json','*.txt','*.mat','*.cfg'])"])
+        return rd
+    if "github.com/" in url:
+        import io
+        import urllib.request
+        import zipfile
+        owner_repo = url.split("github.com/")[1]
+        ref = m.get("repo_ref") or "HEAD"
+        log(f"git not found — downloading {owner_repo}@{ref} as zip")
+        with urllib.request.urlopen(f"https://codeload.github.com/{owner_repo}/zip/{ref}", timeout=300) as r:
+            z = zipfile.ZipFile(io.BytesIO(r.read()))
+        tmp = rd + ".tmp"
+        z.extractall(tmp)
+        inner = os.path.join(tmp, os.listdir(tmp)[0])
+        shutil.move(inner, rd)
+        shutil.rmtree(tmp, ignore_errors=True)
+        return rd
+    raise RuntimeError(f"cannot fetch {url}: install git")
 
 
 def uninstall(pid):

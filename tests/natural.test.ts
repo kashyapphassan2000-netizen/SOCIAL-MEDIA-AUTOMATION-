@@ -11,7 +11,7 @@ import { estimateWordTimings } from "@/lib/media/captions";
 import { chooseHookStyle, collectStats, learnings, recordPublished, setStatsFetcher } from "@/lib/insights";
 import { scriptUser } from "@/lib/ai/prompts";
 import { BEATS, SPOKEN, fastForward, mockAvatar, mockLLM, mockPublishers, mockVoice, saveSchedule, schedule, setup, work, type MemorySheet } from "./helpers";
-import type { Job, Script } from "@/lib/types";
+import type { BrandSettings, Job, Script } from "@/lib/types";
 
 let sheet: MemorySheet;
 beforeEach(async () => {
@@ -105,7 +105,7 @@ describe("natural edit", () => {
 
 describe("brand + learning loop", () => {
   it("series titles, sign-off, hook style and learnings go into the script prompt", () => {
-    const u = scriptUser(schedule({ seriesName: "AI in 30", targetSeconds: 32 }), { title: "T", url: "", source: "S", summary: "", hash: "h" }, { ...({} as never), brandName: "B", handle: "@b", signature: "I'm K. Follow.", ctaText: "x" } as never, {
+    const u = scriptUser(schedule({ seriesName: "AI in 30", targetSeconds: 32 }), { title: "T", url: "", source: "S", summary: "", hash: "h" }, { brandName: "B", handle: "@b", signature: "I'm K. Follow.", ctaText: "x" } as unknown as BrandSettings, {
       hookStyle: "contrarian",
       episode: 12,
       learnings: { summary: "contrarian wins", bestHookStyles: ["contrarian"], topTitles: ["Top A"], weakTitles: ["Weak Z"] },

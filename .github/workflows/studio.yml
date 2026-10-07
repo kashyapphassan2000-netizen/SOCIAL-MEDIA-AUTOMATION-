@@ -1,0 +1,55 @@
+# Builds the Windows desktop app (Studio): ShortsAutopilotStudio-Setup.exe
+# Download it from the run's "Artifacts" section (or from Releases when you push a tag like studio-v1.0.0).
+name: studio-windows
+on:
+  push:
+    paths: ["studio/**", "worker/**", ".github/workflows/studio.yml"]
+    tags: ["studio-v*"]
+  workflow_dispatch: {}
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install ffmpeg-static (downloads the Windows ffmpeg.exe)
+        run: npm install --no-save ffmpeg-static@5
+      - name: Build single-file exe (Node SEA) + resources
+        env:
+          BUNDLE_FFMPEG: "1"
+        run: node studio/build.mjs
+      - name: Bundle uv (installs Python for the user automatically)
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip -OutFile uv.zip
+          Expand-Archive uv.zip -DestinationPath uvtmp
+          Copy-Item (Get-ChildItem uvtmp -Recurse -Filter uv.exe | Select-Object -First 1).FullName dist/studio/resources/bin/uv.exe
+      - name: Smoke test the exe
+        shell: pwsh
+        run: |
+          $env:STUDIO_NO_BROWSER = "1"; $env:STUDIO_PORT = "7799"; $env:STUDIO_HOME = "$env:RUNNER_TEMP\studio"
+          $p = Start-Process dist/studio/ShortsStudio.exe -PassThru
+          Start-Sleep 6
+          $html = (Invoke-WebRequest http://127.0.0.1:7799/ -UseBasicParsing).Content
+          if ($html -notmatch "Autopilot Studio") { throw "UI not served" }
+          Stop-Process $p.Id
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          $env:STUDIO_VERSION = if ($env:GITHUB_REF_NAME -like "studio-v*") { $env:GITHUB_REF_NAME.Substring(8) } else { "0.0.$env:GITHUB_RUN_NUMBER" }
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" studio\installer.iss
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ShortsAutopilotStudio-Setup
+          path: dist/ShortsAutopilotStudio-Setup.exe
+      - name: Attach to release (tags only)
+        if: startsWith(github.ref, 'refs/tags/studio-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/ShortsAutopilotStudio-Setup.exe
