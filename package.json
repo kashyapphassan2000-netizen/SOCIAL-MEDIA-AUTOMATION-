@@ -9,7 +9,8 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "tick": "tsx scripts/tick.ts"
+    "tick": "node --env-file-if-exists=.env.local --import tsx scripts/tick.ts",
+    "worker": "node --env-file-if-exists=.env.local --import tsx scripts/tick.ts --loop"
   },
   "engines": {
     "node": ">=20"

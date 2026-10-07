@@ -1,0 +1,32 @@
+# Heartbeat for the automation. Vercel Hobby crons run only once a day, so this pings the worker
+# twice an hour. The worker itself chains follow-up runs while a video is being produced.
+# Needs repo secrets: APP_URL (https://your-app.vercel.app) and CRON_SECRET (same value as in Vercel).
+# NOTE: GitHub only runs scheduled workflows from the DEFAULT branch.
+name: autopilot-heartbeat
+on:
+  schedule:
+    - cron: "7,37 * * * *"
+  workflow_dispatch: {}
+concurrency:
+  group: autopilot-heartbeat
+  cancel-in-progress: false
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Trigger worker
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$APP_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "::warning::Set APP_URL and CRON_SECRET repository secrets to enable the heartbeat"; exit 0
+          fi
+          for i in 1 2 3; do
+            code=$(curl -sS -o /tmp/out.txt -w "%{http_code}" --max-time 60 -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/tick?async=1") || code=000
+            cat /tmp/out.txt; echo; echo "HTTP $code"
+            if [ "$code" = "202" ] || [ "$code" = "200" ]; then exit 0; fi
+            sleep $((i * 10))
+          done
+          echo "::error::Worker did not accept the trigger"; exit 1

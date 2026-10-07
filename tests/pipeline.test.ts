@@ -101,6 +101,23 @@ describe("full pipeline", () => {
     expect(info).toMatch(/Audio: aac/);
   });
 
+  it("still-image fallback works with PNG photos (extension sniffed from bytes)", async () => {
+    const { runFfmpeg } = await import("@/lib/media/ffmpeg");
+    const os = await import("node:os");
+    const png = `${os.tmpdir()}/sa-photo-${Date.now()}.png`;
+    await runFfmpeg(["-y", "-f", "lavfi", "-i", "testsrc2=s=720x1280:d=1", "-frames:v", "1", png]);
+    await saveAssets({ ...(await getAssets()), photoUrl: `file://${png}` });
+    const s = await getSettings();
+    await saveSettings({ ...s, generateLooks: false });
+    const { pubs } = mockPublishers({});
+    setDeps({ llms: () => [mockLLM()], voices: () => [mockVoice()], avatars: () => [AVATAR_REGISTRY.still], trends, publishers: pubs, generateLook: async () => Buffer.alloc(0) });
+    const sch = schedule({ platforms: ["youtube"] });
+    await saveSchedule(sch);
+    const done = await runUntilDone((await createJob(sch, "manual", "t")).id);
+    expect(done?.status).toBe("done");
+    expect(done?.data.editMode).toBe("full-1080p");
+  });
+
   it("private test mode posts only to YouTube (private) and skips the rest", async () => {
     const { pubs, calls } = mockPublishers({});
     let privacy = false;
@@ -167,6 +184,19 @@ describe("full pipeline", () => {
     const r2 = await tick({ budgetSec: 1 });
     expect(r2.created).toBe(0);
     expect((await listRecentJobs()).length).toBe(2);
+  });
+});
+
+describe("preflight", () => {
+  it("does not burn the daily cap when setup is incomplete, and says why", async () => {
+    const { pubs } = mockPublishers({});
+    setDeps({ llms: () => [mockLLM()], voices: () => [mockVoice()], avatars: () => [AVATAR_REGISTRY.still], trends, publishers: pubs, generateLook: async () => Buffer.alloc(0) });
+    await saveAssets({});
+    await saveSchedule(schedule());
+    const r = await tick({ budgetSec: 1 });
+    expect(r.created).toBe(0);
+    const { getKV } = await import("@/lib/store/kv");
+    expect((await getKV().get<{ problems: string[] }>("worker:blocked"))?.problems).toContain("no creator photo uploaded");
   });
 });
 

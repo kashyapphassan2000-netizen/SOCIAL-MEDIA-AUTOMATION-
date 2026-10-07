@@ -26,7 +26,7 @@ export function fontsDir(): string {
 
 export async function runFfmpeg(args: string[], timeoutMs = 240_000): Promise<string> {
   return new Promise((resolve, reject) => {
-    const p = spawn(ffmpegPath(), ["-hide_banner", "-nostdin", ...args], { stdio: ["ignore", "ignore", "pipe"] });
+    const p = spawn(/*turbopackIgnore: true*/ ffmpegPath(), ["-hide_banner", "-nostdin", ...args], { stdio: ["ignore", "ignore", "pipe"] });
     let err = "";
     p.stderr.on("data", (d) => {
       err += d.toString();
@@ -62,7 +62,7 @@ export async function hasAudioStream(file: string): Promise<boolean> {
 }
 
 export function tmpDir(prefix = "sa-"): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  return fs.mkdtempSync(path.join(/*turbopackIgnore: true*/ os.tmpdir(), prefix));
 }
 
 export function rmrf(dir: string) {
@@ -72,4 +72,11 @@ export function rmrf(dir: string) {
 /** Normalise any voice clip (mp4/mov/m4a/wav) to mono 44.1k mp3 for cloning, trimmed to maxSec. */
 export async function extractVoice(input: string, out: string, maxSec = 120) {
   await runFfmpeg(["-y", "-i", input, "-vn", "-ac", "1", "-ar", "44100", "-t", String(maxSec), "-af", "highpass=f=70,loudnorm=I=-16:TP=-1.5", "-c:a", "libmp3lame", "-b:a", "160k", out]);
+}
+
+/** File extension from magic bytes — ffmpeg's image demuxer trusts the extension. */
+export function imageExt(buf: Buffer): "png" | "webp" | "jpg" {
+  if (buf.length > 4 && buf[0] === 0x89 && buf.toString("ascii", 1, 4) === "PNG") return "png";
+  if (buf.length > 12 && buf.toString("ascii", 0, 4) === "RIFF" && buf.toString("ascii", 8, 12) === "WEBP") return "webp";
+  return "jpg";
 }

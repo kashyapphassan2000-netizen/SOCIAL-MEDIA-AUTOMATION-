@@ -10,7 +10,7 @@ import { PUBLISHERS, isPermanent, type Publisher } from "./publishers";
 import { ReauthRequired } from "./connections";
 import { estimateWordTimings } from "./media/captions";
 import { PROFILES, renderShort } from "./media/editor";
-import { probeDuration, rmrf, runFfmpeg, tmpDir } from "./media/ffmpeg";
+import { imageExt, probeDuration, rmrf, runFfmpeg, tmpDir } from "./media/ffmpeg";
 import { getStorage, type Storage } from "./storage";
 import { getKV } from "./store/kv";
 import { jobRow, flushSheet, logRow } from "./sheets";
@@ -227,8 +227,9 @@ async function edit(job: Job, s: BrandSettings): Promise<StageResult> {
   const dir = tmpDir();
   try {
     const still = !job.data.avatarUrl;
-    const visual = path.join(dir, still ? "visual.jpg" : "visual.mp4");
-    fs.writeFileSync(visual, await storage.read(still ? job.data.lookUrl! : job.data.avatarUrl!));
+    const visualBuf = await storage.read(still ? job.data.lookUrl! : job.data.avatarUrl!);
+    const visual = path.join(dir, still ? `visual.${imageExt(visualBuf)}` : "visual.mp4");
+    fs.writeFileSync(visual, visualBuf);
     const audioExt = job.data.audioUrl!.split("?")[0].split(".").pop() || "mp3";
     const audio = path.join(dir, `voice.${audioExt}`);
     fs.writeFileSync(audio, await storage.read(job.data.audioUrl!));
@@ -267,12 +268,12 @@ async function edit(job: Job, s: BrandSettings): Promise<StageResult> {
       log(job, "warn", "Published raw avatar video without branding (editor failed)");
     }
     if (!out) throw new Error("Editing failed in every mode");
-    job.data.videoUrl = await storage.put(`jobs/${job.id}/short.mp4`, fs.readFileSync(out.videoPath), "video/mp4");
+    job.data.videoUrl = await storage.put(`jobs/${job.id}/short.mp4`, fs.readFileSync(/*turbopackIgnore: true*/ out.videoPath), "video/mp4");
     job.blobs.push(job.data.videoUrl);
-    job.data.thumbnailUrl = await storage.put(`jobs/${job.id}/thumb.jpg`, fs.readFileSync(out.thumbPath), "image/jpeg");
+    job.data.thumbnailUrl = await storage.put(`jobs/${job.id}/thumb.jpg`, fs.readFileSync(/*turbopackIgnore: true*/ out.thumbPath), "image/jpeg");
     job.blobs.push(job.data.thumbnailUrl);
     job.data.editMode = out.mode;
-    log(job, "info", `Edited (${out.mode}), ${(fs.statSync(out.videoPath).size / 1e6).toFixed(1)} MB`);
+    log(job, "info", `Edited (${out.mode}), ${(fs.statSync(/*turbopackIgnore: true*/ out.videoPath).size / 1e6).toFixed(1)} MB`);
     return { next: "publish" };
   } finally {
     rmrf(dir);
@@ -434,8 +435,24 @@ export async function createJob(s: Schedule, trigger: Job["trigger"], by: string
   return job;
 }
 
+/** Reasons the automation cannot produce a video at all — checked before spending the daily cap. */
+export async function preflight(s: BrandSettings): Promise<string[]> {
+  const a = await getAssets();
+  const problems: string[] = [];
+  if (!deps.llms(s).some((l) => l.available())) problems.push("no script AI key (ANTHROPIC_API_KEY / GEMINI_API_KEY / OPENAI_API_KEY)");
+  if (!a.photoUrl) problems.push("no creator photo uploaded");
+  if (!deps.voices(s).some((v) => v.available(a) && (v.cloned || s.allowGenericVoiceFallback))) problems.push("no usable voice (upload a voice clip + set ELEVENLABS_API_KEY or FAL_KEY)");
+  return problems;
+}
+
 export async function enqueueDue(): Promise<Job[]> {
   const s = await getSettings();
+  const problems = await preflight(s);
+  if (problems.length) {
+    await getKV().set("worker:blocked", { at: new Date().toISOString(), problems }, { ttlSec: 3 * 3600 });
+    return [];
+  }
+  await getKV().del("worker:blocked");
   const [schedules, active] = await Promise.all([listSchedules(), listActiveJobs()]);
   const created: Job[] = [];
   for (const sch of schedules) {
