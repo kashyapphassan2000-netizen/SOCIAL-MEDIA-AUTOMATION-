@@ -1,0 +1,38 @@
+{
+  "name": "shorts-autopilot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Hands-free short-form video factory: trend research -> script -> cloned voice -> talking avatar -> edit -> publish to YouTube Shorts, Instagram Reels, Facebook Reels, X, Threads, LinkedIn -> Google Sheet log -> cleanup.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "tick": "tsx scripts/tick.ts"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.131.0",
+    "@upstash/redis": "^1.39.0",
+    "@vercel/blob": "^2.8.1",
+    "bcryptjs": "^3.0.3",
+    "ffmpeg-static": "^5.3.0",
+    "jose": "^6.2.12",
+    "next": "^16.4.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^26.6.4",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  }
+}
