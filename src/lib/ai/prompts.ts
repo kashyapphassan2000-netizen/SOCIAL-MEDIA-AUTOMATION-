@@ -41,6 +41,9 @@ const CAPTION_RULES: Record<Platform, string> = {
   x: "X post: max 240 characters total including 1-2 hashtags, punchy, no links",
   threads: "Threads post: max 430 characters, conversational, ends with a question, at most 1 hashtag",
   linkedin: "LinkedIn post: professional insight, why it matters for careers/business, 3-6 short lines, 3 hashtags (max 1300 chars)",
+  pinterest: "Pinterest description: keyword-rich, searchable (Pinterest is a search engine), 2-3 sentences, 3-5 hashtags (max 450 chars)",
+  bluesky: "Bluesky post: max 280 characters total, conversational, 1-2 hashtags",
+  telegram: "Telegram channel post: bold-free plain text, 2-4 short lines with the key takeaway and source credit (max 900 chars)",
 };
 
 export function scriptUser(s: Schedule, story: Story, brand: BrandSettings): string {
@@ -98,6 +101,9 @@ export function validateScript(v: unknown, targetSeconds: number): Script {
   for (const p of PLATFORMS) captions[p] = typeof caps[p] === "string" && (caps[p] as string).trim() ? (caps[p] as string).trim() : fallback;
   captions.x = captions.x.slice(0, 275);
   captions.threads = captions.threads.slice(0, 495);
+  captions.bluesky = captions.bluesky.slice(0, 295);
+  captions.pinterest = captions.pinterest.slice(0, 495);
+  captions.telegram = captions.telegram.slice(0, 1000);
   const hashtags = Array.isArray(o.hashtags) ? o.hashtags.map((h: unknown) => String(h).replace(/^#/, "").replace(/\s+/g, "")).filter(Boolean).slice(0, 10) : [];
   return {
     hook: str(o.hook, "hook", 200),

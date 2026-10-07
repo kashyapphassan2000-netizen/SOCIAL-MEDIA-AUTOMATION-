@@ -2,6 +2,7 @@ import { download, http, httpJson } from "../http";
 import { falAvailable, falRun } from "./fal";
 import { wordsFromCharAlignment } from "../media/captions";
 import type { Assets, WordTiming } from "../types";
+import { enqueueTask, freeWorkerEnabled, getTask } from "../freeworker";
 
 export interface VoiceResult {
   audio: Buffer;
@@ -13,6 +14,8 @@ export interface VoiceResult {
 
 export interface VoiceContext {
   assets: Assets;
+  /** ISO language code of the script (en, hi, ...). */
+  language: string;
   /** Persist a newly created cloned-voice id. */
   saveVoiceId(id: string): Promise<void>;
   readSample(url: string): Promise<Buffer>;
@@ -25,6 +28,9 @@ export interface VoiceProvider {
   /** true = sounds like the creator; false = generic stock voice. */
   cloned: boolean;
   synthesize(text: string, ctx: VoiceContext): Promise<VoiceResult>;
+  /** Async providers (self-hosted worker): queue the work and poll later instead of synthesize(). */
+  submit?(text: string, ctx: VoiceContext): Promise<string>;
+  poll?(taskId: string): Promise<{ state: "pending" } | { state: "done"; url: string } | { state: "failed"; error: string }>;
 }
 
 const EL = "https://api.elevenlabs.io/v1";
@@ -111,4 +117,25 @@ const openaiTts: VoiceProvider = {
   },
 };
 
-export const VOICE_REGISTRY: Record<string, VoiceProvider> = { elevenlabs, "fal-f5": falF5, "openai-tts": openaiTts };
+/** FREE: Chatterbox (MIT licence, 23 languages incl. Hindi) on your own worker — zero API cost. */
+const freeChatterbox: VoiceProvider = {
+  name: "free-chatterbox",
+  cloned: true,
+  available: (a) => freeWorkerEnabled() && !!(a.voiceRefShortUrl || a.voiceSampleUrl),
+  async synthesize() {
+    throw new Error("free-chatterbox is asynchronous");
+  },
+  async submit(text, ctx) {
+    const t = await enqueueTask("tts", { text, refAudioUrl: ctx.assets.voiceRefShortUrl || ctx.assets.voiceSampleUrl!, language: ctx.language || "en" });
+    return t.id;
+  },
+  async poll(id) {
+    const t = await getTask(id);
+    if (!t) return { state: "failed", error: "task expired" };
+    if (t.status === "done" && t.outputUrl) return { state: "done", url: t.outputUrl };
+    if (t.status === "failed") return { state: "failed", error: t.error ?? "worker failed" };
+    return { state: "pending" };
+  },
+};
+
+export const VOICE_REGISTRY: Record<string, VoiceProvider> = { "free-chatterbox": freeChatterbox, elevenlabs, "fal-f5": falF5, "openai-tts": openaiTts };

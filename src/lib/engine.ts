@@ -136,41 +136,77 @@ async function look(job: Job, s: BrandSettings): Promise<StageResult> {
   return { next: "voice" };
 }
 
+const VOICE_TIMEOUT_MIN = Number(process.env.FREE_VOICE_TIMEOUT_MIN || 60);
+
 async function voice(job: Job, s: BrandSettings): Promise<StageResult> {
   const assets = await getAssets();
   const text = job.data.script!.spoken;
   const storage = deps.storage();
-  const errors: string[] = [];
-  for (const v of deps.voices(s)) {
-    if (!v.available(assets)) continue;
-    if (!v.cloned && !s.allowGenericVoiceFallback) continue;
+  const sched = await getSchedule(job.scheduleId);
+  const ctx = {
+    assets,
+    language: sched?.language || "en",
+    saveVoiceId: async (id: string) => saveAssets({ ...(await getAssets()), elevenVoiceId: id }),
+    readSample: (u: string) => storage.read(u),
+  };
+  const providers = deps.voices(s).filter((v) => v.cloned || s.allowGenericVoiceFallback);
+
+  const finish = async (name: string, cloned: boolean, audio: Buffer, ext: string, url?: string, words?: Job["data"]["words"]): Promise<StageResult> => {
+    const dir = tmpDir();
     try {
-      const r = await v.synthesize(text, {
-        assets,
-        saveVoiceId: async (id) => saveAssets({ ...(await getAssets()), elevenVoiceId: id }),
-        readSample: (u) => storage.read(u),
-      });
-      const dir = tmpDir();
-      try {
-        const f = path.join(dir, `voice.${r.ext}`);
-        fs.writeFileSync(f, r.audio);
-        job.data.audioSeconds = await probeDuration(f);
-      } finally {
-        rmrf(dir);
+      const f = path.join(dir, `voice.${ext}`);
+      fs.writeFileSync(f, audio);
+      job.data.audioSeconds = await probeDuration(f);
+    } finally {
+      rmrf(dir);
+    }
+    job.data.audioUrl = url ?? (await storage.put(`jobs/${job.id}/voice.${ext}`, audio, ext === "wav" ? "audio/wav" : "audio/mpeg"));
+    job.blobs.push(job.data.audioUrl);
+    job.data.words = words?.length ? words : estimateWordTimings(text, job.data.audioSeconds);
+    job.data.voiceProvider = name + (cloned ? "" : " (generic)");
+    job.data.voiceTask = undefined;
+    if (!cloned) log(job, "warn", "Using a GENERIC voice (clone providers failed) — allowed by settings");
+    log(job, "info", `Voice by ${name}: ${job.data.audioSeconds.toFixed(1)}s`);
+    return { next: "avatar" };
+  };
+
+  // An async (self-hosted) voice task is in flight: poll it.
+  const vt = job.data.voiceTask;
+  if (vt) {
+    const p = providers.find((x) => x.name === vt.provider);
+    const r = p?.poll ? await p.poll(vt.taskId) : ({ state: "failed", error: "provider removed" } as const);
+    if (r.state === "done") {
+      const ext = r.url.split("?")[0].split(".").pop() || "mp3";
+      return finish(vt.provider, p!.cloned, await storage.read(r.url), ext, r.url);
+    }
+    const mins = (Date.now() - new Date(vt.submittedAt).getTime()) / 60000;
+    if (r.state === "pending" && mins < VOICE_TIMEOUT_MIN) return { wait: 30 };
+    log(job, "warn", r.state === "failed" ? `${vt.provider} failed: ${r.error}` : `${vt.provider} not done after ${mins.toFixed(0)} min — falling back`);
+    job.data.voiceTask = undefined;
+    job.data.voiceProviderIndex = (job.data.voiceProviderIndex ?? 0) + 1;
+  }
+
+  const errors: string[] = [];
+  for (let i = job.data.voiceProviderIndex ?? 0; i < providers.length; i++) {
+    const v = providers[i];
+    job.data.voiceProviderIndex = i;
+    if (!v.available(assets)) continue;
+    try {
+      if (v.submit) {
+        const taskId = await v.submit(text, ctx);
+        job.data.voiceTask = { provider: v.name, taskId, submittedAt: new Date().toISOString() };
+        log(job, "info", `Queued voice clone on ${v.name} (free worker)`);
+        return { wait: 60 };
       }
-      job.data.audioUrl = await storage.put(`jobs/${job.id}/voice.${r.ext}`, r.audio, r.contentType);
-      job.blobs.push(job.data.audioUrl);
-      job.data.words = r.words?.length ? r.words : estimateWordTimings(text, job.data.audioSeconds);
-      job.data.voiceProvider = v.name + (v.cloned ? "" : " (generic)");
-      if (!v.cloned) log(job, "warn", "Using a GENERIC voice (clone providers failed) — allowed by settings");
-      log(job, "info", `Voice by ${v.name}: ${job.data.audioSeconds.toFixed(1)}s`);
-      return { next: "avatar" };
+      const r = await v.synthesize(text, ctx);
+      return await finish(v.name, v.cloned, r.audio, r.ext, undefined, r.words);
     } catch (e) {
       errors.push(`${v.name}: ${(e as Error).message.slice(0, 250)}`);
       log(job, "warn", `Voice provider ${v.name} failed: ${(e as Error).message}`);
     }
   }
-  throw new Error(`No voice provider succeeded${errors.length ? "" : " (none configured: add ELEVENLABS_API_KEY or FAL_KEY and upload a voice clip)"}`);
+  job.data.voiceProviderIndex = 0; // next attempt starts over from the preferred provider
+  throw new Error(`No voice provider succeeded${errors.length ? "" : " (none configured: set up the free worker (WORKER_SECRET) or ELEVENLABS_API_KEY / FAL_KEY, and upload a voice clip)"}`);
 }
 
 async function avatar(job: Job, s: BrandSettings): Promise<StageResult> {
@@ -183,11 +219,12 @@ async function avatar(job: Job, s: BrandSettings): Promise<StageResult> {
     const res = p ? await p.poll(req) : ({ state: "failed", error: "provider removed" } as const);
     if (res.state === "pending") {
       const mins = (Date.now() - new Date(req.submittedAt).getTime()) / 60000;
-      if (mins < AVATAR_TIMEOUT_MIN) return { wait: mins < 2 ? 40 : 25 };
+      if (mins < (p?.timeoutMin ?? AVATAR_TIMEOUT_MIN)) return { wait: mins < 2 ? 40 : 30 };
       log(job, "warn", `${req.provider} still not done after ${mins.toFixed(0)} min — falling back`);
     } else if (res.state === "done") {
       job.data.avatarUrl = res.videoUrl;
       job.data.avatarProvider = req.provider;
+      if (req.provider.startsWith("free-")) job.blobs.push(res.videoUrl); // stored in our Blob — delete after posting
       log(job, "info", `Avatar ready from ${req.provider}`);
       return { next: "edit" };
     } else {
@@ -213,7 +250,7 @@ async function avatar(job: Job, s: BrandSettings): Promise<StageResult> {
     try {
       job.data.avatar = await p.submit(input);
       log(job, "info", `Submitted talking-head render to ${p.name}`);
-      return { wait: 60 };
+      return { wait: p.name.startsWith("free-") ? 120 : 60 };
     } catch (e) {
       log(job, "warn", `${p.name} submit failed: ${(e as Error).message}`);
     }
@@ -439,9 +476,9 @@ export async function createJob(s: Schedule, trigger: Job["trigger"], by: string
 export async function preflight(s: BrandSettings): Promise<string[]> {
   const a = await getAssets();
   const problems: string[] = [];
-  if (!deps.llms(s).some((l) => l.available())) problems.push("no script AI key (ANTHROPIC_API_KEY / GEMINI_API_KEY / OPENAI_API_KEY)");
+  if (!deps.llms(s).some((l) => l.available())) problems.push("no script AI key (free: GEMINI_API_KEY / GROQ_API_KEY / CEREBRAS_API_KEY / OPENROUTER_API_KEY / NVIDIA_API_KEY)");
   if (!a.photoUrl) problems.push("no creator photo uploaded");
-  if (!deps.voices(s).some((v) => v.available(a) && (v.cloned || s.allowGenericVoiceFallback))) problems.push("no usable voice (upload a voice clip + set ELEVENLABS_API_KEY or FAL_KEY)");
+  if (!deps.voices(s).some((v) => v.available(a) && (v.cloned || s.allowGenericVoiceFallback))) problems.push("no usable voice (upload a voice clip + set WORKER_SECRET for the free worker, or ELEVENLABS_API_KEY / FAL_KEY)");
   return problems;
 }
 

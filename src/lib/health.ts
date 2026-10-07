@@ -5,7 +5,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { ffmpegPath, fontsDir, rmrf, runFfmpeg, tmpDir } from "./media/ffmpeg";
 import { buildThumbnailAss } from "./media/captions";
-import { googleAccessToken, linkedinAccessToken, metaToken, xAccessToken } from "./connections";
+import { googleAccessToken, linkedinAccessToken, metaToken, pinterestToken, xAccessToken } from "./connections";
+import { queueStats } from "./freeworker";
 import { httpJson } from "./http";
 import { flushSheet } from "./sheets";
 import { LLM_REGISTRY } from "./ai/llm";
@@ -61,7 +62,7 @@ export async function runHealth(): Promise<Check[]> {
       const on = s.llmProviders.filter((n) => LLM_REGISTRY[n]?.available());
       if (!on.length) throw new Error("no LLM key set");
       return `available: ${on.join(" → ")}`;
-    }, "Set ANTHROPIC_API_KEY and/or GEMINI_API_KEY / OPENAI_API_KEY"),
+    }, "Set a FREE key: GEMINI_API_KEY, GROQ_API_KEY, CEREBRAS_API_KEY, OPENROUTER_API_KEY or NVIDIA_API_KEY"),
     check("Voice clone", async () => {
       if (!a.voiceSampleUrl) throw new Error("no voice clip uploaded");
       const parts: string[] = [];
@@ -71,15 +72,17 @@ export async function runHealth(): Promise<Check[]> {
         });
         parts.push(`ElevenLabs ${u.subscription?.tier ?? ""} ${u.subscription?.character_count ?? "?"}/${u.subscription?.character_limit ?? "?"} chars, voice ${a.elevenVoiceId || process.env.ELEVENLABS_VOICE_ID ? "cloned" : "not yet cloned"}`);
       }
+      if (process.env.WORKER_SECRET) parts.unshift("FREE Chatterbox clone on your worker");
       if (process.env.FAL_KEY) parts.push("fal F5 zero-shot fallback ready");
-      if (!parts.length) throw new Error("no voice provider key");
+      if (!parts.length) throw new Error("no voice provider: set WORKER_SECRET (free worker) or ELEVENLABS_API_KEY / FAL_KEY");
       return parts.join("; ");
-    }, "Studio → upload a 60-120s voice clip; set ELEVENLABS_API_KEY (paid plan for cloning) and FAL_KEY"),
+    }, "Studio → upload a 60-120s voice clip; set WORKER_SECRET (free worker) or ELEVENLABS_API_KEY"),
     check("Talking avatar", async () => {
       if (!a.photoUrl) throw new Error("no photo uploaded");
-      if (!process.env.FAL_KEY) throw new Error("FAL_KEY missing — only the still-photo fallback (no lip-sync) will work");
-      return `providers: ${s.avatarProviders.join(" → ")}; looks generated: ${s.looks.filter((l) => l.imageUrl).length}/${s.looks.length}`;
-    }, "Studio → upload photo; set FAL_KEY (fal.ai)"),
+      if (!process.env.FAL_KEY && !process.env.WORKER_SECRET) throw new Error("no lip-sync provider — set WORKER_SECRET (free SadTalker worker) or FAL_KEY; only the still-photo fallback will work");
+      const looks = process.env.FAL_KEY ? `looks generated: ${s.looks.filter((l) => l.imageUrl).length}/${s.looks.length}` : "outfit looks need FAL_KEY (free mode uses your original photo)";
+      return `providers: ${s.avatarProviders.join(" → ")}; ${looks}`;
+    }, "Studio → upload photo; set WORKER_SECRET (free) and/or FAL_KEY"),
     check("Google Sheet log", async () => {
       const id = s.sheetId || process.env.GOOGLE_SHEET_ID;
       if (!id) throw new Error("no sheet id");
@@ -131,5 +134,21 @@ export async function runHealth(): Promise<Check[]> {
       const days = c?.expiresAt ? Math.round((new Date(c.expiresAt).getTime() - Date.now()) / 86400000) : null;
       return `${me.name}${days !== null ? ` — token expires in ${days} days` : ""}`;
     }, "Connections → Connect LinkedIn (tokens last 60 days)"));
+  if (want("bluesky") || process.env.BLUESKY_HANDLE)
+    checks.push(check("Bluesky", async () => (conns.bluesky?.accountName as string) ?? "connected", "Connections → Bluesky"));
+  if (want("telegram") || process.env.TELEGRAM_BOT_TOKEN)
+    checks.push(check("Telegram", async () => (conns.telegram?.accountName as string) ?? "connected", "Connections → Telegram"));
+  if (want("pinterest") || process.env.PINTEREST_ACCESS_TOKEN)
+    checks.push(check("Pinterest", async () => {
+      const { token, boardId } = await pinterestToken();
+      const b = await httpJson<{ name: string }>(`https://api.pinterest.com/v5/boards/${boardId}`, { headers: { Authorization: `Bearer ${token}` } });
+      return `board "${b.name}"`;
+    }, "Connections → Pinterest"));
+  checks.push(check("Free worker (open-source voice + avatar)", async () => {
+    if (!process.env.WORKER_SECRET) throw new Error("WORKER_SECRET not set — free voice/avatar disabled (paid APIs or still-photo fallback only)");
+    const q = await queueStats();
+    const how = process.env.GH_DISPATCH_TOKEN && process.env.GITHUB_REPO ? `auto-starts on GitHub Actions (${process.env.GITHUB_REPO})` : "no GH_DISPATCH_TOKEN — relies on the 3-hourly schedule or a worker you run yourself";
+    return `${how}; queue: ${q.queued} waiting, ${q.running} running`;
+  }, "Set WORKER_SECRET in Vercel + GitHub secrets; set GH_DISPATCH_TOKEN + GITHUB_REPO for instant start"));
   return Promise.all(checks);
 }

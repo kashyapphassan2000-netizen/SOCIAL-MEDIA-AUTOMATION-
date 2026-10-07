@@ -331,13 +331,24 @@ function Studio({ t, owner }: { t: Toast; owner: boolean }) {
 }
 
 // ---------------------------------------------------------------- Connections
-const CONN: { key: string; oauth: string; label: string; manual?: "instagram" | "facebook" | "threads"; note: string }[] = [
+type Manual = "instagram" | "facebook" | "threads" | "bluesky" | "telegram";
+const MANUAL_LABELS: Record<Manual, [string, string]> = {
+  instagram: ["Long-lived access token", "Account ID (optional — detected from token)"],
+  facebook: ["Page access token", "Page ID (required)"],
+  threads: ["Long-lived access token", "Account ID (optional — detected from token)"],
+  bluesky: ["App password (Settings → Privacy & security → App passwords)", "Handle, e.g. yourname.bsky.social"],
+  telegram: ["Bot token from @BotFather", "Channel: @yourchannel or -100… id (bot must be admin)"],
+};
+const CONN: { key: string; oauth?: string; label: string; manual?: Manual; note: string }[] = [
   { key: "google", oauth: "google", label: "YouTube + Google Sheets", note: "One Google login uploads Shorts and writes the log sheet." },
   { key: "instagram", oauth: "instagram", label: "Instagram (Reels)", manual: "instagram", note: "Instagram Professional (Creator/Business) account required." },
   { key: "facebook", oauth: "facebook", label: "Facebook Page (Reels)", manual: "facebook", note: "Posts to a Facebook Page, not a personal profile (API limitation)." },
   { key: "threads", oauth: "threads", label: "Threads", manual: "threads", note: "" },
   { key: "x", oauth: "x", label: "X (Twitter)", note: "Your X developer plan must allow posting + media upload." },
   { key: "linkedin", oauth: "linkedin", label: "LinkedIn (personal)", note: "Tokens last 60 days — you get a warning before expiry." },
+  { key: "pinterest", oauth: "pinterest", label: "Pinterest (video Pins)", note: "Pins go to your first board (or PINTEREST_BOARD_ID). New apps start in Trial access — apply for Standard access." },
+  { key: "bluesky", label: "Bluesky", manual: "bluesky", note: "Free API, no app review. Uses an app password, not your real password." },
+  { key: "telegram", label: "Telegram channel", manual: "telegram", note: "Create a bot with @BotFather and add it as channel admin. Free, no review." },
 ];
 
 function Connections({ owner, t }: { owner: boolean; t: Toast }) {
@@ -350,7 +361,7 @@ function Connections({ owner, t }: { owner: boolean; t: Toast }) {
       <h2 style={{ marginTop: 8 }}>Connections</h2>
       {CONN.map((c) => {
         const conn = d?.connections[c.key];
-        const missing = d?.oauthMissing[c.oauth] ?? [];
+        const missing = c.oauth ? d?.oauthMissing[c.oauth] ?? [] : [];
         const days = conn?.expiresAt ? Math.round((new Date(conn.expiresAt).getTime() - Date.now()) / 86400000) : null;
         return (
           <div className="card" key={c.key}>
@@ -364,17 +375,17 @@ function Connections({ owner, t }: { owner: boolean; t: Toast }) {
               </div>
               {owner && (
                 <div className="row" style={{ flex: "0 0 auto" }}>
-                  <a className={`btn ${missing.length ? "" : "primary"}`} href={missing.length ? undefined : `/api/oauth/${c.oauth}/start`} onClick={(e) => missing.length && (e.preventDefault(), t.err(`Set ${missing.join(", ")} first`))}>{conn ? "Reconnect" : "Connect"}</a>
-                  {c.manual && <button onClick={() => setManual({ platform: c.manual!, token: "", accountId: "" })}>Paste token</button>}
+                  {c.oauth && <a className={`btn ${missing.length ? "" : "primary"}`} href={missing.length ? undefined : `/api/oauth/${c.oauth}/start`} onClick={(e) => missing.length && (e.preventDefault(), t.err(`Set ${missing.join(", ")} first`))}>{conn ? "Reconnect" : "Connect"}</a>}
+                  {c.manual && <button className={c.oauth ? "" : "primary"} onClick={() => setManual({ platform: c.manual!, token: "", accountId: "" })}>{c.oauth ? "Paste token" : conn ? "Update" : "Connect"}</button>}
                   {conn && <button className="danger" onClick={async () => { if (!confirm("Disconnect?")) return; await api(`/api/connections?platform=${c.key}`, { method: "DELETE" }).catch(t.err); load(); }}>Disconnect</button>}
                 </div>
               )}
             </div>
             {manual && manual.platform === c.manual && (
               <div style={{ marginTop: 10 }}>
-                <label>Long-lived access token</label>
+                <label>{MANUAL_LABELS[c.manual!][0]}</label>
                 <input value={manual.token} onChange={(e) => setManual({ ...manual, token: e.target.value })} />
-                <label>{c.key === "facebook" ? "Page ID (required)" : "Account ID (optional — detected from token)"}</label>
+                <label>{MANUAL_LABELS[c.manual!][1]}</label>
                 <input value={manual.accountId} onChange={(e) => setManual({ ...manual, accountId: e.target.value })} />
                 <div className="row" style={{ marginTop: 10 }}>
                   <button className="primary" onClick={async () => { try { const r = await api("/api/connections", { method: "POST", body: JSON.stringify(manual) }); t.ok(r.message); setManual(null); load(); } catch (e) { t.err(e); } }}>Verify & save</button>
@@ -385,7 +396,7 @@ function Connections({ owner, t }: { owner: boolean; t: Toast }) {
           </div>
         );
       })}
-      <div className="card muted small">TikTok is intentionally not included (banned in India). Snapchat Spotlight, Moj and Josh have no public posting API.</div>
+      <div className="card muted small">Not automatable: TikTok (banned in India, excluded), Snapchat Spotlight (API is allow-list only for approved partners), Moj / Josh / ShareChat / Reddit video (no open posting API). Their monetization is covered in the README.</div>
     </>
   );
 }

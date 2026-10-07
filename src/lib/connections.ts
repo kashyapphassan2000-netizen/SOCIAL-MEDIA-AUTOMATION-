@@ -49,6 +49,18 @@ function envConnection(p: Connection["platform"]): Connection | null {
       return process.env.LINKEDIN_ACCESS_TOKEN && process.env.LINKEDIN_PERSON_URN
         ? { platform: p, accessToken: process.env.LINKEDIN_ACCESS_TOKEN, accountId: process.env.LINKEDIN_PERSON_URN, status: "ok", updatedAt: now }
         : null;
+    case "pinterest":
+      return process.env.PINTEREST_ACCESS_TOKEN
+        ? { platform: p, accessToken: process.env.PINTEREST_ACCESS_TOKEN, refreshToken: process.env.PINTEREST_REFRESH_TOKEN, accountId: process.env.PINTEREST_BOARD_ID, status: "ok", updatedAt: now }
+        : null;
+    case "bluesky":
+      return process.env.BLUESKY_HANDLE && process.env.BLUESKY_APP_PASSWORD
+        ? { platform: p, accountId: process.env.BLUESKY_HANDLE, accessToken: process.env.BLUESKY_APP_PASSWORD, status: "ok", updatedAt: now }
+        : null;
+    case "telegram":
+      return process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID
+        ? { platform: p, accessToken: process.env.TELEGRAM_BOT_TOKEN, accountId: process.env.TELEGRAM_CHAT_ID, status: "ok", updatedAt: now }
+        : null;
     default:
       return null;
   }
@@ -194,6 +206,34 @@ export async function metaToken(p: "instagram" | "facebook" | "threads"): Promis
   const host =
     p === "threads" ? "https://graph.threads.net/v1.0" : p === "instagram" && token.startsWith("IG") ? `https://graph.instagram.com/${GRAPH_VERSION()}` : `https://graph.facebook.com/${GRAPH_VERSION()}`;
   return { token, id: c.accountId, host };
+}
+
+// ---------------- Pinterest (30-day access tokens, refreshable) ----------------
+export const PINTEREST_SCOPES = ["boards:read", "pins:read", "pins:write", "user_accounts:read"];
+
+export function pinterestBasic() {
+  return `Basic ${Buffer.from(`${process.env.PINTEREST_APP_ID}:${process.env.PINTEREST_APP_SECRET}`).toString("base64")}`;
+}
+
+export async function pinterestToken(): Promise<{ token: string; boardId: string }> {
+  const c = await loadConnection("pinterest");
+  if (!c?.accessToken) throw new ReauthRequired("pinterest", "Pinterest not connected");
+  const boardId = c.accountId || process.env.PINTEREST_BOARD_ID;
+  if (!boardId) throw new ReauthRequired("pinterest", "no Pinterest board selected (set PINTEREST_BOARD_ID)");
+  if (c.expiresAt && soon(c.expiresAt, 24 * 3600) && c.refreshToken) {
+    try {
+      const t = await httpJson<{ access_token: string; expires_in: number; refresh_token?: string }>("https://api.pinterest.com/v5/oauth/token", {
+        method: "POST",
+        headers: { Authorization: pinterestBasic(), "Content-Type": "application/x-www-form-urlencoded" },
+        body: form({ grant_type: "refresh_token", refresh_token: c.refreshToken }),
+      });
+      await saveConnection({ ...c, accessToken: t.access_token, refreshToken: t.refresh_token ?? c.refreshToken, expiresAt: inSec(t.expires_in), status: "ok", lastError: undefined });
+      return { token: t.access_token, boardId };
+    } catch (e) {
+      if (soon(c.expiresAt, 0)) throw await markBroken(c, e);
+    }
+  }
+  return { token: c.accessToken, boardId };
 }
 
 export function isConfigured(p: Platform): boolean {

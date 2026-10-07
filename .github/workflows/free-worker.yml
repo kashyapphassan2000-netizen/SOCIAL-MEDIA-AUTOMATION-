@@ -1,0 +1,79 @@
+# Free worker: renders queued voice-clone ("tts") and talking-head ("avatar") tasks with open-source models.
+# Started automatically by the app (workflow_dispatch) when tasks are queued; the schedule is a safety net.
+# Repo secrets: APP_URL, WORKER_SECRET. Optional: KAGGLE_USERNAME + KAGGLE_KEY to render avatars on Kaggle's free GPU.
+# Cost: free on public repos; private repos get 2,000 free minutes/month (voice ≈ 6 min/video).
+name: free-worker
+on:
+  workflow_dispatch:
+    inputs:
+      kinds:
+        description: "tts, avatar or tts,avatar"
+        default: "tts,avatar"
+  schedule:
+    - cron: "23 */3 * * *"
+concurrency:
+  group: free-worker-${{ github.event.inputs.kinds || 'all' }}
+  cancel-in-progress: false
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      kinds: ${{ steps.p.outputs.kinds }}
+      kaggle: ${{ steps.p.outputs.kaggle }}
+    steps:
+      - id: p
+        env:
+          KINDS: ${{ github.event.inputs.kinds || 'tts,avatar' }}
+          HAS_KAGGLE: ${{ secrets.KAGGLE_KEY != '' }}
+        run: |
+          echo "kinds=$KINDS" >> "$GITHUB_OUTPUT"
+          echo "kaggle=$HAS_KAGGLE" >> "$GITHUB_OUTPUT"
+
+  # Voice cloning is fast enough on GitHub's free CPU runners (~5 min per 45 s script).
+  # Avatars run here only when Kaggle is not configured (CPU SadTalker ≈ 2 min per second of video — slow).
+  runner:
+    needs: plan
+    if: contains(needs.plan.outputs.kinds, 'tts') || needs.plan.outputs.kaggle != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Cache models + venvs
+        uses: actions/cache@v4
+        with:
+          path: ~/.shorts-worker
+          key: shorts-worker-v1-${{ runner.os }}-${{ hashFiles('worker/setup.sh') }}
+      - name: Install ffmpeg
+        run: command -v ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
+      - name: Setup models
+        env:
+          WORKER_KINDS: ${{ needs.plan.outputs.kaggle == 'true' && 'tts' || needs.plan.outputs.kinds }}
+        run: bash worker/setup.sh
+      - name: Run worker
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          WORKER_SECRET: ${{ secrets.WORKER_SECRET }}
+          WORKER_KINDS: ${{ needs.plan.outputs.kaggle == 'true' && 'tts' || needs.plan.outputs.kinds }}
+          WORKER_NAME: gh-${{ github.run_id }}
+          IDLE_EXIT_SEC: "240"
+        run: python worker/free_worker.py
+
+  kaggle:
+    needs: plan
+    if: needs.plan.outputs.kaggle == 'true' && contains(needs.plan.outputs.kinds, 'avatar')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install -q kaggle
+      - name: Push GPU job to Kaggle
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+          APP_URL: ${{ secrets.APP_URL }}
+          WORKER_SECRET: ${{ secrets.WORKER_SECRET }}
+          WORKER_KINDS: avatar
+        run: python worker/kaggle_push.py

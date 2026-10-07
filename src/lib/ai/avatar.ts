@@ -1,5 +1,6 @@
 import { falAvailable, falResult, falStatus, falSubmit } from "./fal";
 import type { AvatarRequest } from "../types";
+import { enqueueTask, freeWorkerEnabled, getTask } from "../freeworker";
 
 /**
  * Talking-head generators. All are async: submit -> poll on later ticks -> fetch result.
@@ -18,6 +19,8 @@ export interface AvatarProvider {
   name: string;
   /** Max audio seconds the model accepts. */
   maxSeconds: number;
+  /** Give up and fall back after this many minutes (default 25). */
+  timeoutMin?: number;
   available(inp: AvatarInput): boolean;
   submit(inp: AvatarInput): Promise<AvatarRequest>;
   poll(req: AvatarRequest): Promise<AvatarPoll>;
@@ -49,6 +52,24 @@ function falProvider(name: string, model: string, maxSeconds: number, build: (i:
 }
 
 export const AVATAR_REGISTRY: Record<string, AvatarProvider> = {
+  // FREE: SadTalker (MIT) on your own worker (GitHub Actions / Kaggle / PC). Slower and less expressive than paid models.
+  "free-sadtalker": {
+    name: "free-sadtalker",
+    maxSeconds: 90,
+    timeoutMin: Number(process.env.FREE_AVATAR_TIMEOUT_MIN || 150), // CPU renders are slow
+    available: () => freeWorkerEnabled(),
+    async submit(i) {
+      const t = await enqueueTask("avatar", { imageUrl: i.imageUrl, audioUrl: i.audioUrl });
+      return { provider: "free-sadtalker", requestId: t.id, submittedAt: new Date().toISOString() };
+    },
+    async poll(req) {
+      const t = await getTask(req.requestId);
+      if (!t) return { state: "failed", error: "task expired" };
+      if (t.status === "done" && t.outputUrl) return { state: "done", videoUrl: t.outputUrl };
+      if (t.status === "failed") return { state: "failed", error: t.error ?? "worker failed" };
+      return { state: "pending" };
+    },
+  },
   // ByteDance OmniHuman 1.5 — best expressiveness; 720p accepts up to 60s audio.
   "fal-omnihuman": falProvider("fal-omnihuman", process.env.FAL_OMNIHUMAN_MODEL || "fal-ai/bytedance/omnihuman/v1.5", 60, (i) => ({
     image_url: i.imageUrl,

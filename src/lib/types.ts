@@ -1,4 +1,4 @@
-export const PLATFORMS = ["youtube", "instagram", "facebook", "x", "threads", "linkedin"] as const;
+export const PLATFORMS = ["youtube", "instagram", "facebook", "x", "threads", "linkedin", "pinterest", "bluesky", "telegram"] as const;
 export type Platform = (typeof PLATFORMS)[number];
 
 export const PLATFORM_LABEL: Record<Platform, string> = {
@@ -8,6 +8,9 @@ export const PLATFORM_LABEL: Record<Platform, string> = {
   x: "X (Twitter)",
   threads: "Threads",
   linkedin: "LinkedIn",
+  pinterest: "Pinterest (video Pins)",
+  bluesky: "Bluesky",
+  telegram: "Telegram channel",
 };
 
 export type Role = "owner" | "user";
@@ -155,6 +158,8 @@ export interface Job {
     audioUrl?: string;
     audioSeconds?: number;
     voiceProvider?: string;
+    voiceProviderIndex?: number;
+    voiceTask?: { provider: string; taskId: string; submittedAt: string };
     words?: WordTiming[];
     avatarProviderIndex?: number;
     avatar?: AvatarRequest;

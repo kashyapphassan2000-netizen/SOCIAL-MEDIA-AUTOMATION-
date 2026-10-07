@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { httpJson } from "../http";
+import { HttpFailure, httpJson } from "../http";
 
 export interface LLM {
   name: string;
@@ -38,7 +38,20 @@ class GeminiLLM implements LLM {
     return !!process.env.GEMINI_API_KEY;
   }
   async complete(system: string, user: string) {
-    const model = process.env.GEMINI_MODEL || "gemini-3.6-flash";
+    // Free tier is Flash-only; try the configured model, then newer/older Flash fallbacks.
+    const models = [process.env.GEMINI_MODEL, "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-flash-latest"].filter((m, i, a): m is string => !!m && a.indexOf(m) === i);
+    let last: unknown;
+    for (const model of models) {
+      try {
+        return await this.call(model, system, user);
+      } catch (e) {
+        last = e;
+        if (!(e instanceof HttpFailure && e.status === 404)) throw e;
+      }
+    }
+    throw last;
+  }
+  private async call(model: string, system: string, user: string) {
     const r = await httpJson<any>(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY! },
@@ -80,9 +93,65 @@ class OpenAILLM implements LLM {
   }
 }
 
+/**
+ * Any OpenAI-compatible endpoint with a free tier (Groq, Cerebras, OpenRouter, NVIDIA NIM).
+ * Free catalogues change constantly, so the model is picked at runtime from the provider's
+ * own /models list using a preference order — a retired model never breaks the pipeline.
+ */
+export class OpenAICompatLLM implements LLM {
+  private picked: string | null = null;
+  constructor(
+    public name: string,
+    private base: string,
+    private keyEnv: string,
+    private modelEnv: string,
+    private prefer: (string | RegExp)[],
+  ) {}
+  available() {
+    return !!process.env[this.keyEnv];
+  }
+  private headers() {
+    return { "Content-Type": "application/json", Authorization: `Bearer ${process.env[this.keyEnv]}` };
+  }
+  async model(): Promise<string> {
+    if (process.env[this.modelEnv]) return process.env[this.modelEnv]!;
+    if (this.picked) return this.picked;
+    const r = await httpJson<{ data: { id: string }[] }>(`${this.base}/models`, { headers: this.headers(), timeoutMs: 20_000, retries: 1 });
+    const ids = r.data.map((m) => m.id);
+    const ok = (id: string) => !/embed|guard|whisper|tts|vision-only|coder|rerank|safety|reward|audio|image/i.test(id);
+    for (const p of this.prefer) {
+      const hit = ids.find((id) => ok(id) && (typeof p === "string" ? id === p : p.test(id)));
+      if (hit) return (this.picked = hit);
+    }
+    const any = ids.find(ok);
+    if (!any) throw new Error(`${this.name}: no usable chat model in /models`);
+    return (this.picked = any);
+  }
+  async complete(system: string, user: string) {
+    const model = await this.model();
+    const r = await httpJson<any>(`${this.base}/chat/completions`, {
+      method: "POST",
+      headers: this.headers(),
+      body: JSON.stringify({ model, messages: [{ role: "system", content: system }, { role: "user", content: user }], temperature: 0.8, max_tokens: 4000 }),
+      timeoutMs: 120_000,
+    });
+    const text = r.choices?.[0]?.message?.content;
+    if (!text) throw new Error(`${this.name} (${model}) returned no content`);
+    return text;
+  }
+}
+
+const BIG = [/gpt-oss-120b/, /deepseek-v[34]/i, /kimi-k[23]/i, /llama-4-maverick/i, /qwen3-235b/i, /llama-3\.3-70b/i, /gpt-oss-20b/, /70b/i];
+
 export const LLM_REGISTRY: Record<string, LLM> = {
-  anthropic: new AnthropicLLM(),
+  // ---- free tiers (no card needed) ----
   gemini: new GeminiLLM(),
+  groq: new OpenAICompatLLM("groq", "https://api.groq.com/openai/v1", "GROQ_API_KEY", "GROQ_MODEL", BIG),
+  cerebras: new OpenAICompatLLM("cerebras", "https://api.cerebras.ai/v1", "CEREBRAS_API_KEY", "CEREBRAS_MODEL", BIG),
+  openrouter: new OpenAICompatLLM("openrouter", "https://openrouter.ai/api/v1", "OPENROUTER_API_KEY", "OPENROUTER_MODEL", [/:free$/]),
+  nvidia: new OpenAICompatLLM("nvidia", "https://integrate.api.nvidia.com/v1", "NVIDIA_API_KEY", "NVIDIA_MODEL", BIG),
+  // ---- paid ----
+  anthropic: new AnthropicLLM(),
   openai: new OpenAILLM(),
 };
 

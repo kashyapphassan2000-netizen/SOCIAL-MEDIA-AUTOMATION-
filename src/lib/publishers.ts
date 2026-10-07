@@ -1,4 +1,4 @@
-import { googleAccessToken, linkedinAccessToken, metaToken, xAccessToken } from "./connections";
+import { googleAccessToken, linkedinAccessToken, loadConnection, metaToken, pinterestToken, ReauthRequired, xAccessToken } from "./connections";
 import { form, http, httpJson, HttpFailure } from "./http";
 import type { BrandSettings, Platform, PublishResult, Script, Story } from "./types";
 
@@ -286,7 +286,136 @@ export const linkedin: Publisher = {
   },
 };
 
-export const PUBLISHERS: Record<Platform, Publisher> = { youtube, instagram, facebook, threads, x, linkedin };
+// ---------------- Pinterest video Pin (register -> S3 upload -> poll -> create pin) ----------------
+const PIN = "https://api.pinterest.com/v5";
+export const pinterest: Publisher = {
+  platform: "pinterest",
+  async step(inp, prev) {
+    const { token, boardId } = await pinterestToken();
+    const H = { Authorization: `Bearer ${token}` };
+    const mediaId = prev.pending?.mediaId;
+    if (!mediaId) {
+      const reg = await httpJson<{ media_id: string; upload_url: string; upload_parameters: Record<string, string> }>(`${PIN}/media`, {
+        method: "POST",
+        headers: { ...H, "Content-Type": "application/json" },
+        body: JSON.stringify({ media_type: "video" }),
+      });
+      const fd = new FormData();
+      for (const [k, v] of Object.entries(reg.upload_parameters)) fd.set(k, v);
+      fd.set("file", new Blob([new Uint8Array(await inp.readVideo())], { type: "video/mp4" }), "short.mp4");
+      await http(reg.upload_url, { method: "POST", body: fd, timeoutMs: 180_000, retries: 1 });
+      return processing(prev, { mediaId: reg.media_id }, 20);
+    }
+    const st = await httpJson<{ status: string }>(`${PIN}/media/${mediaId}`, { headers: H });
+    if (st.status === "failed") throw Object.assign(new Error("Pinterest video processing failed"), { resetPending: true });
+    if (st.status !== "succeeded") return processing(prev, {}, 20);
+    const pin = await httpJson<{ id: string }>(`${PIN}/pins`, {
+      method: "POST",
+      headers: { ...H, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        board_id: boardId,
+        title: inp.script.title.slice(0, 100),
+        description: inp.script.captions.pinterest.slice(0, 500),
+        ...(inp.story?.url ? { link: inp.story.url } : {}),
+        media_source: { source_type: "video_id", media_id: mediaId, cover_image_url: inp.thumbnailUrl },
+      }),
+      retries: 0,
+    });
+    return done(prev, pin.id, `https://www.pinterest.com/pin/${pin.id}/`);
+  },
+};
+
+// ---------------- Bluesky (AT Protocol video service -> post with video embed) ----------------
+/** Rich-text facets so #hashtags are clickable (byte offsets, UTF-8). */
+export function hashtagFacets(text: string) {
+  const enc = new TextEncoder();
+  const facets: unknown[] = [];
+  for (const m of text.matchAll(/(^|\s)#([\p{L}\p{N}_]+)/gu)) {
+    const start = enc.encode(text.slice(0, m.index! + m[1].length)).length;
+    const end = start + enc.encode(`#${m[2]}`).length;
+    facets.push({ index: { byteStart: start, byteEnd: end }, features: [{ $type: "app.bsky.richtext.facet#tag", tag: m[2] }] });
+  }
+  return facets;
+}
+
+export const bluesky: Publisher = {
+  platform: "bluesky",
+  async step(inp, prev) {
+    const c = await loadConnection("bluesky");
+    if (!c?.accountId || !c.accessToken) throw new ReauthRequired("bluesky", "Bluesky handle + app password not set");
+    const service = c.extra?.service || "https://bsky.social";
+    const sess = await httpJson<{ accessJwt: string; did: string; handle: string; didDoc?: { service?: { id: string; serviceEndpoint: string }[] } }>(
+      `${service}/xrpc/com.atproto.server.createSession`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ identifier: c.accountId, password: c.accessToken }), retries: 1 },
+    );
+    const pds = sess.didDoc?.service?.find((x) => x.id.endsWith("#atproto_pds"))?.serviceEndpoint ?? service;
+    const A = { Authorization: `Bearer ${sess.accessJwt}` };
+    const jobId = prev.pending?.jobId;
+    if (!jobId) {
+      const sa = await httpJson<{ token: string }>(
+        `${pds}/xrpc/com.atproto.server.getServiceAuth?aud=${encodeURIComponent(`did:web:${new URL(pds).host}`)}&lxm=com.atproto.repo.uploadBlob&exp=${Math.floor(Date.now() / 1000) + 1800}`,
+        { headers: A },
+      );
+      const video = await inp.readVideo();
+      const res = await fetch(`https://video.bsky.app/xrpc/app.bsky.video.uploadVideo?did=${encodeURIComponent(sess.did)}&name=short-${Date.now()}.mp4`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${sa.token}`, "Content-Type": "video/mp4" },
+        body: new Uint8Array(video),
+      });
+      const j = (await res.json().catch(() => ({}))) as { jobId?: string; error?: string; message?: string };
+      // 409 "already_exists" still returns the jobId of the earlier identical upload.
+      if (!j.jobId) throw new HttpFailure(res.status, JSON.stringify(j), "video.bsky.app uploadVideo");
+      return processing(prev, { jobId: j.jobId }, 10);
+    }
+    const st = await httpJson<{ jobStatus: { state: string; blob?: unknown; error?: string } }>(`https://video.bsky.app/xrpc/app.bsky.video.getJobStatus?jobId=${encodeURIComponent(jobId)}`);
+    if (st.jobStatus.state === "JOB_STATE_FAILED") throw Object.assign(new Error(`Bluesky video failed: ${st.jobStatus.error ?? ""}`), { resetPending: true });
+    if (st.jobStatus.state !== "JOB_STATE_COMPLETED" || !st.jobStatus.blob) return processing(prev, {}, 10);
+    const text = inp.script.captions.bluesky.slice(0, 295);
+    const rec = await httpJson<{ uri: string }>(`${pds}/xrpc/com.atproto.repo.createRecord`, {
+      method: "POST",
+      headers: { ...A, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        repo: sess.did,
+        collection: "app.bsky.feed.post",
+        record: {
+          $type: "app.bsky.feed.post",
+          text,
+          facets: hashtagFacets(text),
+          createdAt: new Date().toISOString(),
+          embed: { $type: "app.bsky.embed.video", video: st.jobStatus.blob, aspectRatio: { width: 1080, height: 1920 } },
+        },
+      }),
+      retries: 0,
+    });
+    const rkey = rec.uri.split("/").pop();
+    return done(prev, rec.uri, `https://bsky.app/profile/${sess.handle}/post/${rkey}`);
+  },
+};
+
+// ---------------- Telegram channel (Bot API sendVideo, <= 50 MB) ----------------
+export const telegram: Publisher = {
+  platform: "telegram",
+  async step(inp, prev) {
+    const c = await loadConnection("telegram");
+    if (!c?.accessToken || !c.accountId) throw new ReauthRequired("telegram", "Telegram bot token + channel not set");
+    const fd = new FormData();
+    fd.set("chat_id", c.accountId);
+    fd.set("caption", inp.script.captions.telegram.slice(0, 1024));
+    fd.set("supports_streaming", "true");
+    fd.set("width", "1080");
+    fd.set("height", "1920");
+    fd.set("video", new Blob([new Uint8Array(await inp.readVideo())], { type: "video/mp4" }), "short.mp4");
+    const r = await httpJson<{ ok: boolean; description?: string; result?: { message_id: number; chat: { username?: string } } }>(
+      `https://api.telegram.org/bot${c.accessToken}/sendVideo`,
+      { method: "POST", body: fd, timeoutMs: 180_000, retries: 0 },
+    );
+    if (!r.ok || !r.result) throw new Error(`Telegram: ${r.description ?? "send failed"}`);
+    const u = r.result.chat.username;
+    return done(prev, String(r.result.message_id), u ? `https://t.me/${u}/${r.result.message_id}` : "telegram (private channel)");
+  },
+};
+
+export const PUBLISHERS: Record<Platform, Publisher> = { youtube, instagram, facebook, threads, x, linkedin, pinterest, bluesky, telegram };
 
 /** Errors that will never succeed on retry (bad permissions / policy) — fail fast instead of burning attempts. */
 export function isPermanent(e: unknown): boolean {

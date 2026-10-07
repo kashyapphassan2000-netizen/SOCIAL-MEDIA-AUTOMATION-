@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryKV, setKV } from "@/lib/store/kv";
 import { saveConnection, DEFAULT_SETTINGS } from "@/lib/db";
-import { PUBLISHERS, linkedinVersion, youtubeMeta, isPermanent, type PublishInput } from "@/lib/publishers";
+import { PUBLISHERS, linkedinVersion, youtubeMeta, isPermanent, hashtagFacets, type PublishInput } from "@/lib/publishers";
 import { HttpFailure } from "@/lib/http";
 import { PLATFORMS } from "@/lib/types";
 
@@ -37,6 +37,9 @@ beforeEach(async () => {
   await saveConnection({ platform: "threads", accessToken: "THtoken", accountId: "th1", expiresAt: farLater, status: "ok", updatedAt: "" });
   await saveConnection({ platform: "x", accessToken: "x-access", refreshToken: "x-refresh", expiresAt: later, status: "ok", updatedAt: "" });
   await saveConnection({ platform: "linkedin", accessToken: "li-token", accountId: "urn:li:person:abc", expiresAt: farLater, status: "ok", updatedAt: "" });
+  await saveConnection({ platform: "pinterest", accessToken: "pin-token", accountId: "board9", expiresAt: farLater, status: "ok", updatedAt: "" });
+  await saveConnection({ platform: "bluesky", accessToken: "app-pass", accountId: "me.bsky.social", status: "ok", updatedAt: "" });
+  await saveConnection({ platform: "telegram", accessToken: "123:ABC", accountId: "@mychannel", status: "ok", updatedAt: "" });
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -199,6 +202,70 @@ describe("LinkedIn", () => {
   it("version header is two months back", () => {
     expect(linkedinVersion(new Date("2026-10-07T00:00:00Z"))).toBe("202608");
     expect(linkedinVersion(new Date("2026-01-15T00:00:00Z"))).toBe("202511");
+  });
+});
+
+describe("Pinterest", () => {
+  it("registers media, uploads to S3 with the given params, waits, creates a video pin with cover", async () => {
+    let status = "processing";
+    routes.push([/api\.pinterest\.com\/v5\/media$/, () => json({ media_id: "m77", upload_url: "https://pinterest-media-upload.s3.test/", upload_parameters: { key: "k1", policy: "p1" } })]);
+    routes.push([/s3\.test/, () => new Response(null, { status: 204 })]);
+    routes.push([/v5\/media\/m77/, () => json({ status })]);
+    routes.push([/v5\/pins/, () => json({ id: "pin5" }, { status: 201 })]);
+    let r = await PUBLISHERS.pinterest.step(input(), { state: "pending", attempts: 0 });
+    expect(r.state).toBe("processing");
+    const up = calls.find((c) => c.url.includes("s3.test"))!;
+    expect((up.body as FormData).get("key")).toBe("k1");
+    expect((up.body as FormData).get("file")).toBeTruthy();
+    r = await PUBLISHERS.pinterest.step(input(), r);
+    expect(r.state).toBe("processing");
+    status = "succeeded";
+    r = await PUBLISHERS.pinterest.step(input(), r);
+    expect(r).toMatchObject({ state: "done", url: "https://www.pinterest.com/pin/pin5/" });
+    const body = JSON.parse(calls.find((c) => c.url.endsWith("/v5/pins"))!.body);
+    expect(body).toMatchObject({ board_id: "board9", media_source: { source_type: "video_id", media_id: "m77", cover_image_url: "https://blob.test/thumb.jpg" } });
+  });
+});
+
+describe("Bluesky", () => {
+  it("session -> service auth for its PDS -> video service upload -> job poll -> post with video embed + hashtag facets", async () => {
+    let state = "JOB_STATE_ENCODING";
+    routes.push([/bsky\.social\/xrpc\/com\.atproto\.server\.createSession/, () =>
+      json({ accessJwt: "jwt", did: "did:plc:abc", handle: "me.bsky.social", didDoc: { service: [{ id: "#atproto_pds", serviceEndpoint: "https://morel.us-east.host.bsky.network" }] } })]);
+    routes.push([/getServiceAuth/, () => json({ token: "svc" })]);
+    routes.push([/app\.bsky\.video\.uploadVideo/, () => json({ jobId: "job1", state: "JOB_STATE_CREATED" })]);
+    routes.push([/getJobStatus/, () => json({ jobStatus: { state, blob: state === "JOB_STATE_COMPLETED" ? { $type: "blob", ref: { $link: "bafy" }, mimeType: "video/mp4", size: 1 } : undefined } })]);
+    routes.push([/createRecord/, () => json({ uri: "at://did:plc:abc/app.bsky.feed.post/3kxyz", cid: "c" })]);
+    let r = await PUBLISHERS.bluesky.step(input(), { state: "pending", attempts: 0 });
+    expect(r.state).toBe("processing");
+    const sa = calls.find((c) => c.url.includes("getServiceAuth"))!;
+    expect(sa.url).toContain("morel.us-east.host.bsky.network/xrpc");
+    expect(decodeURIComponent(sa.url)).toContain("aud=did:web:morel.us-east.host.bsky.network");
+    expect(calls.find((c) => c.url.includes("uploadVideo"))!.headers.authorization).toBe("Bearer svc");
+    r = await PUBLISHERS.bluesky.step(input(), r);
+    expect(r.state).toBe("processing");
+    state = "JOB_STATE_COMPLETED";
+    r = await PUBLISHERS.bluesky.step(input(), r);
+    expect(r).toMatchObject({ state: "done", url: "https://bsky.app/profile/me.bsky.social/post/3kxyz" });
+    const rec = JSON.parse(calls.find((c) => c.url.includes("createRecord"))!.body).record;
+    expect(rec.embed).toMatchObject({ $type: "app.bsky.embed.video", aspectRatio: { width: 1080, height: 1920 } });
+  });
+  it("hashtag facets use UTF-8 byte offsets", () => {
+    const f = hashtagFacets("नमस्ते #AI news #tech") as { index: { byteStart: number; byteEnd: number }; features: { tag: string }[] }[];
+    const bytes = new TextEncoder().encode("नमस्ते #AI news #tech");
+    expect(f.map((x) => x.features[0].tag)).toEqual(["AI", "tech"]);
+    expect(new TextDecoder().decode(bytes.slice(f[0].index.byteStart, f[0].index.byteEnd))).toBe("#AI");
+  });
+});
+
+describe("Telegram", () => {
+  it("sendVideo to the channel and builds a public link", async () => {
+    routes.push([/api\.telegram\.org\/bot123:ABC\/sendVideo/, () => json({ ok: true, result: { message_id: 42, chat: { username: "mychannel" } } })]);
+    const r = await PUBLISHERS.telegram.step(input(), { state: "pending", attempts: 0 });
+    expect(r).toMatchObject({ state: "done", url: "https://t.me/mychannel/42" });
+    const fd = calls[0].body as FormData;
+    expect(fd.get("chat_id")).toBe("@mychannel");
+    expect(fd.get("supports_streaming")).toBe("true");
   });
 });
 

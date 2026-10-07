@@ -1,11 +1,11 @@
 import crypto from "node:crypto";
 import { getKV } from "./store/kv";
 import { saveConnection } from "./db";
-import { appUrl, GOOGLE_SCOPES, GRAPH_VERSION, LINKEDIN_SCOPES, X_SCOPES, xExchange } from "./connections";
+import { appUrl, GOOGLE_SCOPES, GRAPH_VERSION, LINKEDIN_SCOPES, PINTEREST_SCOPES, pinterestBasic, X_SCOPES, xExchange } from "./connections";
 import { form, httpJson } from "./http";
 import type { Connection } from "./types";
 
-export const OAUTH_PROVIDERS = ["google", "x", "linkedin", "instagram", "threads", "facebook"] as const;
+export const OAUTH_PROVIDERS = ["google", "x", "linkedin", "instagram", "threads", "facebook", "pinterest"] as const;
 export type OAuthProvider = (typeof OAUTH_PROVIDERS)[number];
 
 const redirect = (p: OAuthProvider) => `${appUrl()}/api/oauth/${p}/callback`;
@@ -20,6 +20,7 @@ export function oauthEnvMissing(p: OAuthProvider): string[] {
     instagram: ["INSTAGRAM_APP_ID", "INSTAGRAM_APP_SECRET"],
     threads: ["THREADS_APP_ID", "THREADS_APP_SECRET"],
     facebook: ["META_APP_ID", "META_APP_SECRET"],
+    pinterest: ["PINTEREST_APP_ID", "PINTEREST_APP_SECRET"],
   };
   return need[p].filter((k) => !process.env[k]);
 }
@@ -54,6 +55,8 @@ export async function startUrl(p: OAuthProvider): Promise<string> {
         client_id: process.env.META_APP_ID!, redirect_uri: redirect(p), state, response_type: "code",
         scope: "pages_show_list,pages_read_engagement,pages_manage_posts,publish_video",
       })}`;
+    case "pinterest":
+      return `https://www.pinterest.com/oauth/?${q({ client_id: process.env.PINTEREST_APP_ID!, redirect_uri: redirect(p), response_type: "code", scope: PINTEREST_SCOPES.join(","), state })}`;
   }
 }
 
@@ -131,17 +134,51 @@ export async function finish(p: OAuthProvider, code: string, state: string): Pro
       c = { platform: "facebook", accessToken: page.access_token, accountId: page.id, accountName: page.name, status: "ok", updatedAt: now() };
       break;
     }
+    case "pinterest": {
+      const t = await httpJson<{ access_token: string; refresh_token?: string; expires_in: number }>("https://api.pinterest.com/v5/oauth/token", {
+        method: "POST",
+        headers: { Authorization: pinterestBasic(), "Content-Type": "application/x-www-form-urlencoded" },
+        body: form({ grant_type: "authorization_code", code, redirect_uri: redirect(p) }),
+      });
+      const H = { Authorization: `Bearer ${t.access_token}` };
+      const me = await httpJson<{ username: string }>("https://api.pinterest.com/v5/user_account", { headers: H }).catch(() => ({ username: "" }));
+      const boards = await httpJson<{ items: { id: string; name: string }[] }>("https://api.pinterest.com/v5/boards?page_size=50", { headers: H });
+      const board = boards.items.find((b) => b.id === process.env.PINTEREST_BOARD_ID) ?? boards.items[0];
+      if (!board) throw new Error("No Pinterest board found — create a board first");
+      c = { platform: "pinterest", accessToken: t.access_token, refreshToken: t.refresh_token, expiresAt: inSec(t.expires_in), accountId: board.id, accountName: `${me.username} → board "${board.name}"`, status: "ok", updatedAt: now() };
+      break;
+    }
   }
   await saveConnection(c);
   return `${p} connected as ${c.accountName ?? c.accountId}`;
 }
 
 /** Manual token paste (Meta App Dashboard "Generate token"). Validates before saving. */
-export async function saveManual(p: "instagram" | "facebook" | "threads", token: string, accountId?: string): Promise<string> {
+export type ManualPlatform = "instagram" | "facebook" | "threads" | "bluesky" | "telegram";
+
+export async function saveManual(p: ManualPlatform, token: string, accountId?: string): Promise<string> {
   let id = accountId;
   let name = "";
   let expiresAt: string | undefined;
-  if (p === "instagram") {
+  if (p === "bluesky") {
+    // token = app password (Settings -> Privacy and security -> App passwords), accountId = handle
+    if (!id) throw new Error("Bluesky handle is required (e.g. yourname.bsky.social)");
+    const s = await httpJson<{ handle: string; did: string }>("https://bsky.social/xrpc/com.atproto.server.createSession", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ identifier: id, password: token }),
+      retries: 0,
+    });
+    name = `@${s.handle}`;
+  } else if (p === "telegram") {
+    // token = bot token from @BotFather, accountId = @channelusername or -100... id; the bot must be a channel admin
+    if (!id) throw new Error("Telegram channel (@username or -100… id) is required");
+    const chat = await httpJson<{ ok: boolean; result: { title?: string; username?: string } }>(`https://api.telegram.org/bot${token}/getChat?chat_id=${encodeURIComponent(id)}`, { retries: 0 });
+    const me = await httpJson<{ result: { id: number } }>(`https://api.telegram.org/bot${token}/getMe`, { retries: 0 });
+    const member = await httpJson<{ result: { status: string } }>(`https://api.telegram.org/bot${token}/getChatMember?chat_id=${encodeURIComponent(id)}&user_id=${me.result.id}`, { retries: 0 });
+    if (!["administrator", "creator"].includes(member.result.status)) throw new Error("Make the bot an admin of the channel (with 'Post messages') first");
+    name = chat.result.title ?? chat.result.username ?? id;
+  } else if (p === "instagram") {
     const host = token.startsWith("IG") ? `https://graph.instagram.com/${GRAPH_VERSION()}` : `https://graph.facebook.com/${GRAPH_VERSION()}`;
     if (token.startsWith("IG")) {
       const me = await httpJson<{ user_id: string; username: string }>(`${host}/me?fields=user_id,username&access_token=${encodeURIComponent(token)}`);

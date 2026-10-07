@@ -43,14 +43,15 @@ export const DEFAULT_SETTINGS: BrandSettings = {
   allowGenericVoiceFallback: false,
   allowStillImageFallback: true,
   maxVideosPerDay: 6,
-  dailyPlatformCaps: { youtube: 10, instagram: 20, facebook: 20, x: 20, threads: 20, linkedin: 3 },
+  dailyPlatformCaps: { youtube: 10, instagram: 20, facebook: 20, x: 20, threads: 20, linkedin: 3, pinterest: 10, bluesky: 20, telegram: 20 },
   youtubeCategoryId: "28",
   youtubePrivacy: "public",
   musicUrl: "",
   musicVolume: 0.08,
-  avatarProviders: ["fal-omnihuman", "fal-fabric", "still"],
-  voiceProviders: ["elevenlabs", "fal-f5"],
-  llmProviders: ["anthropic", "gemini", "openai"],
+  // Free first; paid providers only kick in if their key is set (and the free path fails).
+  avatarProviders: ["free-sadtalker", "fal-omnihuman", "fal-fabric", "still"],
+  voiceProviders: ["free-chatterbox", "elevenlabs", "fal-f5"],
+  llmProviders: ["gemini", "groq", "cerebras", "openrouter", "nvidia", "anthropic", "openai"],
   sheetId: "",
 };
 
