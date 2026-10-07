@@ -3,8 +3,10 @@
 name: studio-windows
 on:
   push:
-    paths: ["studio/**", "worker/**", ".github/workflows/studio.yml"]
+    # Listing only `tags` would silently skip branch pushes — list both.
+    branches: ["**"]
     tags: ["studio-v*"]
+    paths: ["studio/**", "worker/**", ".github/workflows/studio.yml"]
   workflow_dispatch: {}
 permissions:
   contents: write
