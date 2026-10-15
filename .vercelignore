@@ -1,11 +1,12 @@
 # Never upload local data (your photo/voice/tokens), build output or tooling to Vercel.
-.data
-.env*
-dist
-.next
-node_modules
-docs
-tests
-studio
-worker
-*.xlsx
+# Leading "/" = only the top-level folder (an unanchored "dist" would also match node_modules/next/dist).
+/.data
+/.env*
+/dist
+/.next
+/node_modules
+/docs
+/tests
+/studio
+/worker
+/*.xlsx

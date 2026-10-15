@@ -9,7 +9,8 @@ const config: NextConfig = {
   ...(process.env.NEXT_STANDALONE ? { output: "standalone" as const } : {}),
   serverExternalPackages: ["ffmpeg-static"],
   // Never trace local data (your photo, voice, tokens), build output or tooling into a bundle.
-  outputFileTracingExcludes: { "*": ["./.data/**", "./dist/**", "./docs/**", "./worker/**", "./studio/**", "./tests/**", "./*.xlsx"] },
+  // (Studio bundle only — on Vercel these folders are never uploaded, see .vercelignore.)
+  ...(process.env.NEXT_STANDALONE ? { outputFileTracingExcludes: { "*": ["./.data/**", "./dist/**", "./docs/**", "./worker/**", "./studio/**", "./tests/**", "./*.xlsx"] } } : {}),
   outputFileTracingIncludes: {
     "/api/cron/tick": mediaFiles,
     "/api/jobs/run": mediaFiles,
