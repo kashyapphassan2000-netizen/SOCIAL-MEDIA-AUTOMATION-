@@ -11,3 +11,8 @@ coverage
 dist
 __pycache__
 *.pyc
+
+# Agent skill docs pulled in by the Vercel CLI (third-party, not project code)
+.agents/
+.claude/skills/
+skills-lock.json
