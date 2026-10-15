@@ -6,24 +6,25 @@ on:
     # Listing only `tags` would silently skip branch pushes — list both.
     branches: ["**"]
     tags: ["studio-v*"]
-    paths: ["studio/**", "worker/**", ".github/workflows/studio.yml"]
+    paths: ["studio/**", "worker/**", "src/**", "package.json", "next.config.ts", ".github/workflows/studio.yml"]
   workflow_dispatch: {}
 permissions:
   contents: write
 jobs:
   build:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Install ffmpeg-static (downloads the Windows ffmpeg.exe)
-        run: npm install --no-save ffmpeg-static@5
-      - name: Build single-file exe (Node SEA) + resources
+      - name: Install app dependencies (also fetches the Windows ffmpeg.exe)
+        run: npm ci
+      - name: Build single-file exe (Node SEA) + resources + bundled app ("Run everything on this PC")
         env:
           BUNDLE_FFMPEG: "1"
+          BUNDLE_APP: "1"
         run: node studio/build.mjs
       - name: Bundle uv (installs Python for the user automatically)
         shell: pwsh
@@ -39,6 +40,24 @@ jobs:
           Start-Sleep 6
           $html = (Invoke-WebRequest http://127.0.0.1:7799/ -UseBasicParsing).Content
           if ($html -notmatch "Autopilot Studio") { throw "UI not served" }
+          $tok = [regex]::Match($html, 'const T = "([a-f0-9]+)"').Groups[1].Value
+          $h = @{ "x-studio-token" = $tok }
+          Invoke-RestMethod -Method Post -Uri http://127.0.0.1:7799/api/factory -Headers $h -ContentType "application/json" -Body '{"action":"start"}' | Out-Null
+          $ok = $false
+          for ($i = 0; $i -lt 30; $i++) {
+            Start-Sleep 2
+            try { $r = Invoke-WebRequest http://127.0.0.1:3100/api/me -UseBasicParsing -SkipHttpErrorCheck; if ($r.StatusCode -in 200, 401) { $ok = $true; break } } catch {}
+          }
+          $f = Invoke-RestMethod -Uri http://127.0.0.1:7799/api/factory -Headers $h
+          $f.log -join "`n"
+          if (-not $ok) { throw "bundled app server did not start" }
+          $login = @{ email = $f.login.email; password = $f.login.password } | ConvertTo-Json
+          Invoke-RestMethod -Method Post -Uri http://127.0.0.1:3100/api/auth/login -ContentType "application/json" -Body $login -SessionVariable s | Out-Null
+          $health = Invoke-RestMethod -Uri http://127.0.0.1:3100/api/health -WebSession $s
+          $health.checks | Format-Table name, ok, detail -AutoSize | Out-String -Width 200
+          $ff = $health.checks | Where-Object { $_.name -like "Video engine*" }
+          if (-not $ff.ok) { throw "ffmpeg render failed in the bundled app: $($ff.detail)" }
+          Invoke-RestMethod -Method Post -Uri http://127.0.0.1:7799/api/factory -Headers $h -ContentType "application/json" -Body '{"action":"stop"}' | Out-Null
           Stop-Process $p.Id
       - name: Build installer (Inno Setup)
         shell: pwsh

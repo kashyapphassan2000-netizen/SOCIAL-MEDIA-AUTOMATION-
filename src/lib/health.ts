@@ -63,7 +63,7 @@ export async function runHealth(): Promise<Check[]> {
       const customs = await loadCustomLLMs();
       const on = [...new Set([...s.llmProviders, ...customs, "pollinations"])].filter((n) => LLM_REGISTRY[n]?.available());
       if (!on.length) throw new Error("no LLM available");
-      if (on.length === 1 && on[0] === "pollinations") return "only the keyless Pollinations fallback (works, weaker scripts) — add a free GEMINI_API_KEY or GROQ_API_KEY";
+      if (on.length === 1 && on[0] === "pollinations") return "only the keyless fallback (works, weaker scripts) — paste any AI key in Brand & Settings → AI brain";
       return `available: ${on.join(" → ")}`;
     }, "Paste any AI key in Brand & Settings → AI brain (Gemini, Groq, OpenAI, Claude, DeepSeek, ... or a local Ollama URL)"),
     check("Voice clone", async () => {

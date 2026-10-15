@@ -28,6 +28,7 @@ table { width:100%; border-collapse:collapse; } td { padding:7px 4px; border-bot
 .out video, .out audio { width:100%; max-height:420px; border-radius:10px; background:#000; }
 .grid2 { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px; }
 .card { border:1px solid var(--line); border-radius:10px; padding:8px; }
+.btn { display:inline-block; padding:6px 12px; border:1px solid var(--line); border-radius:8px; text-decoration:none; color:inherit; }
 </style>
 </head>
 <body>
@@ -35,7 +36,28 @@ table { width:100%; border-collapse:collapse; } td { padding:7px 4px; border-bot
 <main>
 <div>
   <section>
-    <h2>1 · Connect to your app</h2>
+    <h2>★ Run everything on this PC</h2>
+    <p class="muted small">The full Shorts Autopilot (dashboard, schedules, news research, script AI, voice clone, video editor, posting) runs right here — no Vercel, no cloud account. It checks your schedules every minute and renders with this PC's GPU (or CPU). Keep the PC on while it should post.</p>
+    <div class="row">
+      <button class="p" onclick="factory('start')">Start</button>
+      <button class="d" onclick="factory('stop')">Stop</button>
+      <a id="fOpen" class="btn" target="_blank" style="display:none">Open dashboard ↗</a>
+      <span id="fState" class="small muted"></span>
+    </div>
+    <div class="small" id="fLogin" style="margin-top:6px"></div>
+    <div class="row" style="margin-top:8px">
+      <div><label>Owner email (dashboard login)</label><input id="fEmail"></div>
+      <div><label>Vercel Blob token (optional — public video links for Instagram / Facebook / Threads / webhooks)</label><input id="fBlob" type="password" placeholder="vercel_blob_rw_…"></div>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <label style="flex:0 0 auto"><input type="checkbox" id="fAuto" style="width:auto"> Start automatically when Studio opens (install option "Start with Windows" opens Studio at login)</label>
+      <button onclick="factorySave()">Save</button>
+    </div>
+    <details class="small muted" style="margin-top:6px"><summary>Server log</summary><pre class="log" id="fLog" style="max-height:200px"></pre></details>
+  </section>
+
+  <section>
+    <h2>1 · Or connect to your cloud app (Vercel)</h2>
     <div class="row">
       <div><label>App URL</label><input id="appUrl" placeholder="https://your-app.vercel.app"></div>
       <div><label>Worker secret (same as WORKER_SECRET in Vercel)</label><input id="workerSecret" type="password"></div>
@@ -216,8 +238,26 @@ function showResult(r) {
   if (!list.length) return;
   $("outputs").innerHTML = list.map((x) => `<div class="card"><b>${esc(x.id)}</b> <span class="small ${x.ok ? "ok" : "bad"}">${x.ok ? x.seconds + " s" : esc(x.error || "failed")}</span>${x.output ? media(x.output) : ""}</div>`).join("");
 }
-status(); plugins(); jobsList();
-setInterval(status, 15000);
+async function factory(action) {
+  try { await api("/api/factory", { method: "POST", body: JSON.stringify({ action }) }); } catch (e) { alert(e.message); }
+  setTimeout(factoryStatus, 1500);
+}
+async function factorySave() {
+  await api("/api/factory", { method: "POST", body: JSON.stringify({ action: "settings", ownerEmail: $("fEmail").value, blobToken: $("fBlob").value, autoStart: $("fAuto").checked }) });
+  factoryStatus();
+}
+async function factoryStatus() {
+  const f = await api("/api/factory");
+  if (!f.available) { $("fState").textContent = "not included in this build"; return; }
+  $("fState").textContent = f.running ? "running" : "stopped";
+  $("fOpen").style.display = f.running ? "" : "none"; $("fOpen").href = f.url;
+  $("fLogin").innerHTML = `Dashboard: <code>${esc(f.url)}</code> · login <code>${esc(f.login.email)}</code> / <code>${esc(f.login.password)}</code>`;
+  if (document.activeElement !== $("fEmail")) $("fEmail").value = f.login.email;
+  $("fBlob").value = f.blobToken; $("fAuto").checked = f.autoStart;
+  $("fLog").textContent = f.log.join("\n");
+}
+status(); plugins(); jobsList(); factoryStatus();
+setInterval(status, 15000); setInterval(factoryStatus, 10000);
 </script>
 </body>
 </html>

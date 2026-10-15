@@ -36,4 +36,19 @@ if (process.env.BUNDLE_FFMPEG) {
   const ff = path.join(root, "node_modules", "ffmpeg-static", win ? "ffmpeg.exe" : "ffmpeg");
   if (fs.existsSync(ff)) fs.copyFileSync(ff, path.join(out, "resources", "bin", path.basename(ff)));
 }
+
+// 4. "Run everything on this PC": the whole web app as a self-contained server + a plain node runtime
+//    (the SEA exe always runs its embedded script, so the app server needs its own node binary).
+if (process.env.BUNDLE_APP) {
+  execFileSync(win ? "npx.cmd" : "npx", ["next", "build"], { cwd: root, stdio: "inherit", shell: win, env: { ...process.env, NEXT_STANDALONE: "1" } });
+  const app = path.join(out, "resources", "app");
+  fs.cpSync(path.join(root, ".next", "standalone"), app, { recursive: true });
+  // Belt and braces: personal data and build output must never ship inside the installer.
+  for (const d of [".data", "dist", "docs", "worker", "studio", "tests", "src", ".env", ".env.local"]) fs.rmSync(path.join(app, d), { recursive: true, force: true });
+  fs.cpSync(path.join(root, ".next", "static"), path.join(app, ".next", "static"), { recursive: true });
+  if (fs.existsSync(path.join(root, "public"))) fs.cpSync(path.join(root, "public"), path.join(app, "public"), { recursive: true });
+  fs.cpSync(path.join(root, "assets"), path.join(app, "assets"), { recursive: true });
+  fs.copyFileSync(process.execPath, path.join(out, "resources", "bin", win ? "node.exe" : "node"));
+  console.log("bundled app server", app);
+}
 console.log("built", exe);

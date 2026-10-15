@@ -32,7 +32,7 @@ class VercelBlobStorage implements Storage {
 
 export class LocalStorage implements Storage {
   publicUrls = false;
-  constructor(private dir = path.join(process.cwd(), ".data", "blobs")) {}
+  constructor(private dir = path.join(process.env.DATA_DIR || process.cwd(), ".data", "blobs")) {}
   async put(name: string, data: Buffer) {
     const safe = `${Date.now().toString(36)}-${name.replace(/[^\w.-]/g, "_")}`;
     fs.mkdirSync(this.dir, { recursive: true });

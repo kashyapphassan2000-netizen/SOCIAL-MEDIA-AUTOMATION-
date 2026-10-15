@@ -21,9 +21,11 @@ Source: "..\dist\studio\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversio
 [Icons]
 Name: "{group}\Shorts Autopilot Studio"; Filename: "{app}\ShortsStudio.exe"
 Name: "{userdesktop}\Shorts Autopilot Studio"; Filename: "{app}\ShortsStudio.exe"; Tasks: desktopicon
+Name: "{userstartup}\Shorts Autopilot Studio"; Filename: "{app}\ShortsStudio.exe"; Parameters: "--background"; Tasks: startup; Flags: runminimized
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"
+Name: "startup"; Description: "Start with Windows (runs your schedules in the background — turn on 'Start automatically' inside Studio)"; GroupDescription: "Automation:"
 
 [Run]
 Filename: "{app}\ShortsStudio.exe"; Description: "Launch Shorts Autopilot Studio"; Flags: nowait postinstall skipifsilent

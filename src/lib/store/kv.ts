@@ -171,7 +171,7 @@ export function getKV(): KV {
       // On Vercel without Redis every invocation would start from zero — refuse loudly instead of silently losing state.
       throw new Error("No Redis configured. Add Upstash Redis from the Vercel Marketplace (KV_REST_API_URL / KV_REST_API_TOKEN).");
     }
-    singleton = new MemoryKV(path.join(process.cwd(), ".data", "kv.json"));
+    singleton = new MemoryKV(path.join(process.env.DATA_DIR || process.cwd(), ".data", "kv.json"));
   }
   return singleton;
 }
