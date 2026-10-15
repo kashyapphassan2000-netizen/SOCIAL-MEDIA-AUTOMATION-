@@ -1,13 +1,14 @@
 import { after } from "next/server";
 import { isCronRequest, readSession } from "@/lib/auth";
 import { handle, json } from "@/lib/api";
+import { isGithubActions } from "@/lib/ghoidc";
 import { runWorker } from "@/lib/worker";
 
 export const maxDuration = 300;
 export const dynamic = "force-dynamic";
 
 async function run(req: Request) {
-  const viaCron = isCronRequest(req);
+  const viaCron = isCronRequest(req) || (await isGithubActions(req));
   const s = viaCron ? null : await readSession();
   if (!viaCron && !s) return json({ error: "unauthorized" }, 401);
   const u = new URL(req.url);

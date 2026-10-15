@@ -12,7 +12,7 @@ export const maxDuration = 60;
  * Vercel caps request bodies at 4.5 MB — the worker compresses outputs below that.
  */
 export const POST = handle(async (req: Request) => {
-  requireWorker(req);
+  await requireWorker(req);
   const fd = await req.formData();
   const id = String(fd.get("taskId") ?? "");
   const t = await getTask(id);

@@ -1,12 +1,17 @@
 # Heartbeat for the automation. Vercel Hobby crons run only once a day, so this pings the worker
 # hourly. The worker itself chains follow-up runs while a video is being produced.
-# Needs repo secrets: APP_URL (https://your-app.vercel.app) and CRON_SECRET (same value as in Vercel).
+# No repo secrets needed: the app URL is read from .github/app-url (or the APP_URL secret) and the call is
+# authenticated with a GitHub OIDC token the app verifies (CRON_SECRET still works if you prefer).
 # NOTE: GitHub only runs scheduled workflows from the DEFAULT branch.
 name: autopilot-heartbeat
 on:
   schedule:
     - cron: "7 * * * *"
   workflow_dispatch: {}
+permissions:
+  contents: read
+  id-token: write
+  actions: write # lets this workflow start free-worker itself, so the app needs no GitHub token
 concurrency:
   group: autopilot-heartbeat
   cancel-in-progress: false
@@ -15,18 +20,35 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github
       - name: Trigger worker
         env:
           APP_URL: ${{ secrets.APP_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
-          if [ -z "$APP_URL" ] || [ -z "$CRON_SECRET" ]; then
-            echo "::warning::Set APP_URL and CRON_SECRET repository secrets to enable the heartbeat"; exit 0
+          APP_URL="${APP_URL:-$(cat .github/app-url 2>/dev/null)}"
+          if [ -z "$APP_URL" ]; then echo "::warning::No app URL yet (.github/app-url or APP_URL secret)"; exit 0; fi
+          if [ -z "$CRON_SECRET" ]; then
+            CRON_SECRET=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=shorts-autopilot" | python3 -c "import json,sys;print(json.load(sys.stdin)['value'])")
           fi
           for i in 1 2 3; do
             code=$(curl -sS -o /tmp/out.txt -w "%{http_code}" --max-time 60 -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/tick?async=1") || code=000
             cat /tmp/out.txt; echo; echo "HTTP $code"
-            if [ "$code" = "202" ] || [ "$code" = "200" ]; then exit 0; fi
+            if [ "$code" = "202" ] || [ "$code" = "200" ]; then break; fi
+            if [ "$i" = 3 ]; then echo "::error::Worker did not accept the trigger"; exit 1; fi
             sleep $((i * 10))
           done
-          echo "::error::Worker did not accept the trigger"; exit 1
+          echo "APP_URL=$APP_URL" >> "$GITHUB_ENV"
+          echo "BEARER=$CRON_SECRET" >> "$GITHUB_ENV"
+      - name: Start free worker for queued voice/video tasks
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Only when nothing is already running; the app's own dispatch (GH_DISPATCH_TOKEN) is optional.
+          kinds=$(curl -sS --max-time 30 -H "Authorization: Bearer $BEARER" "$APP_URL/api/worker/pending" | python3 -c "import json,sys;d=json.load(sys.stdin);print(','.join(d.get('queuedKinds',[])))" 2>/dev/null || true)
+          if [ -z "$kinds" ]; then echo "queue empty"; exit 0; fi
+          active=$(gh run list -R "$GITHUB_REPOSITORY" -w free-worker.yml --json status -q '[.[]|select(.status=="in_progress" or .status=="queued")]|length')
+          if [ "${active:-0}" != "0" ]; then echo "free-worker already running"; exit 0; fi
+          gh workflow run free-worker.yml -R "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" -f kinds="$kinds"

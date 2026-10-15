@@ -1,6 +1,7 @@
 import { getKV } from "./store/kv";
 import { newId } from "./crypto";
 import { http } from "./http";
+import { trustedRepo } from "./ghoidc";
 
 /**
  * Zero-cost GPU/CPU offload. The app queues "tts" / "avatar" tasks here; a worker running
@@ -32,7 +33,8 @@ const MAX_ATTEMPTS = 2;
 const TTL = 3 * 24 * 3600;
 
 export function freeWorkerEnabled(): boolean {
-  return !!process.env.WORKER_SECRET;
+  // A shared secret, or GitHub Actions OIDC for this repo (no secret to copy anywhere).
+  return !!process.env.WORKER_SECRET || !!trustedRepo();
 }
 
 export async function enqueueTask(kind: FreeTaskKind, input: FreeTask["input"]): Promise<FreeTask> {
@@ -88,13 +90,14 @@ export async function completeTask(id: string, r: { outputUrl?: string; error?: 
 export async function queueStats() {
   const ids = await getKV().smembers(QUEUE);
   const tasks = (await Promise.all(ids.map((id) => getTask(id)))).filter((t): t is FreeTask => !!t);
-  return { queued: tasks.filter((t) => t.status === "queued").length, running: tasks.filter((t) => t.status === "claimed").length };
+  const queued = tasks.filter((t) => t.status === "queued");
+  return { queued: queued.length, running: tasks.filter((t) => t.status === "claimed").length, queuedKinds: [...new Set(queued.map((t) => t.kind))] };
 }
 
 /** Start the GitHub Actions worker right away instead of waiting for its schedule. */
 export async function dispatchWorker(kind: FreeTaskKind): Promise<boolean> {
   const token = process.env.GH_DISPATCH_TOKEN;
-  const repo = process.env.GITHUB_REPO; // "owner/name"
+  const repo = trustedRepo(); // "owner/name"
   if (!token || !repo) return false;
   const kv = getKV();
   // A running worker drains the whole queue, so one dispatch per kind every few minutes is enough.

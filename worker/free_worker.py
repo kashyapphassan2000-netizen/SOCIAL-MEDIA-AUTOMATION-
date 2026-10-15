@@ -12,7 +12,7 @@ Each kind tries its plugins in your preferred order and falls back to the next o
 Runs on GitHub Actions (free CPU), Kaggle (free GPU), your own PC (Studio app) — stdlib only.
 
 env:
-  APP_URL, WORKER_SECRET          required
+  APP_URL, WORKER_SECRET          required (in GitHub Actions with `id-token: write`, OIDC replaces WORKER_SECRET)
   WORKER_HOME                     plugins/venvs/weights location (default ~/.shorts-worker)
   WORKER_KINDS                    default "tts,lipsync,avatar"
   IDLE_EXIT_SEC                   exit after this long with an empty queue (default 120; 0 = never)
@@ -43,9 +43,26 @@ UPLOAD_LIMIT = 4_200_000  # Vercel request body limit is 4.5 MB
 log = rt.log
 
 
+_oidc = {"token": "", "at": 0.0}
+
+
+def bearer():
+    """WORKER_SECRET, or inside GitHub Actions a fresh OIDC token (no repo secrets needed)."""
+    if SECRET:
+        return SECRET
+    req_url, req_tok = os.environ.get("ACTIONS_ID_TOKEN_REQUEST_URL"), os.environ.get("ACTIONS_ID_TOKEN_REQUEST_TOKEN")
+    if not (req_url and req_tok):
+        return ""
+    if time.time() - _oidc["at"] > 240:
+        r = urllib.request.Request(f"{req_url}&audience=shorts-autopilot", headers={"Authorization": f"bearer {req_tok}"})
+        _oidc["token"] = json.load(urllib.request.urlopen(r, timeout=30))["value"]
+        _oidc["at"] = time.time()
+    return _oidc["token"]
+
+
 def api(path, data=None, files=None, timeout=60):
     url = f"{APP}{path}"
-    headers = {"Authorization": f"Bearer {SECRET}"}
+    headers = {"Authorization": f"Bearer {bearer()}"}
     body = None
     if files is not None:
         boundary = uuid.uuid4().hex
@@ -143,8 +160,8 @@ HANDLERS = {"tts": do_tts, "lipsync": lambda t, w: _video_task(t, w, "lipsync"),
 
 
 def main():
-    if not APP or not SECRET:
-        sys.exit("APP_URL and WORKER_SECRET are required")
+    if not APP or not (SECRET or os.environ.get("ACTIONS_ID_TOKEN_REQUEST_URL")):
+        sys.exit("APP_URL and WORKER_SECRET are required (inside GitHub Actions, OIDC replaces WORKER_SECRET)")
     if shutil.which("ffmpeg") is None:
         sys.exit("ffmpeg not found on PATH")
     kinds = [k for k in KINDS if k in HANDLERS]

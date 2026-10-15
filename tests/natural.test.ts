@@ -54,6 +54,7 @@ describe("natural edit", () => {
     pubs.youtube = { platform: "youtube", step: async (inp, prev) => ((video = await inp.readVideo()), yt.step(inp, prev)) };
     const av = mockAvatar("av", "ok");
     setDeps({
+      enrich: async (st) => st,
       llms: () => [mockLLM({ beats: true })],
       voices: () => [mockVoice()],
       avatars: () => [av],

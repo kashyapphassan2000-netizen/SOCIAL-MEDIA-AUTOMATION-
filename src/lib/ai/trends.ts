@@ -40,6 +40,53 @@ export function parseRss(xml: string, sourceName: string): Story[] {
   }).filter((s) => s.title.length > 8);
 }
 
+/** Atom feeds (<entry>, <link href>) — e.g. The Verge. */
+export function parseAtom(xml: string, sourceName: string): Story[] {
+  const items = xml.match(/<entry>[\s\S]*?<\/entry>/g) ?? [];
+  return items.map((it) => {
+    const tag = (t: string) => strip(new RegExp(`<${t}[^>]*>([\\s\\S]*?)</${t}>`).exec(it)?.[1] ?? "");
+    const title = tag("title");
+    return {
+      title,
+      url: /<link[^>]*href="([^"]+)"/.exec(it)?.[1] ?? "",
+      source: sourceName,
+      summary: (tag("summary") || tag("content")).slice(0, 400),
+      publishedAt: tag("published") || tag("updated") || undefined,
+      hash: storyHash(title),
+    };
+  }).filter((s) => s.title.length > 8);
+}
+
+/** Publisher feeds carry direct article links (Google News links can't be opened server-side), so their stories can be fact-grounded. */
+const AI_FEEDS = (process.env.AI_FEEDS || "https://techcrunch.com/category/artificial-intelligence/feed/,https://www.theverge.com/rss/ai-artificial-intelligence/index.xml,https://openai.com/news/rss.xml,https://blog.google/technology/ai/rss/")
+  .split(",").map((u) => u.trim()).filter(Boolean);
+
+async function publisherFeed(url: string): Promise<Story[]> {
+  const res = await http(url, { timeoutMs: 20_000, retries: 1, headers: { "User-Agent": "Mozilla/5.0 ShortsAutopilot" } });
+  const xml = await res.text();
+  const name = new URL(url).hostname.replace(/^www\./, "");
+  const all = xml.includes("<entry>") ? parseAtom(xml, name) : parseRss(xml, name);
+  const since = Date.now() - 36 * 3600_000;
+  return all.filter((s) => !s.publishedAt || new Date(s.publishedAt).getTime() > since).slice(0, 15);
+}
+
+/**
+ * Pull the article text so the script is written from real facts, not just a headline (small free models
+ * invent numbers when they only see a title). Best effort: paragraphs only, ~3,000 chars.
+ */
+export async function enrichStory(story: Story): Promise<Story> {
+  if (!/^https?:\/\//.test(story.url) || /news\.google\.com/.test(story.url)) return story;
+  try {
+    const res = await http(story.url, { timeoutMs: 15_000, retries: 0, headers: { "User-Agent": "Mozilla/5.0 (compatible; ShortsAutopilot)" } });
+    const html = (await res.text()).slice(0, 1_500_000);
+    const paras = [...html.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/g)].map((m) => strip(m[1])).filter((t) => t.length > 60);
+    const details = paras.join(" ").slice(0, 3000);
+    return details.length > 200 ? { ...story, details } : story;
+  } catch {
+    return story;
+  }
+}
+
 async function googleNews(query: string, lang: string): Promise<Story[]> {
   const gl = process.env.TRENDS_GEO || "IN";
   const hl = `${lang}-${gl}`;
@@ -81,6 +128,7 @@ export const fetchTrends: TrendFetcher = async (queries, lang) => {
     tasks.push(hackerNews(q));
   }
   tasks.push(googleTrends());
+  for (const f of AI_FEEDS) tasks.push(publisherFeed(f));
   const settled = await Promise.allSettled(tasks);
   const stories: Story[] = [];
   const seen = new Set<string>();

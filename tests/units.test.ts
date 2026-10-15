@@ -88,3 +88,20 @@ describe("crypto", () => {
     expect(() => decrypt(parts.join("."))).toThrow();
   });
 });
+
+describe("fact grounding", () => {
+  it("flags numbers the source never mentions, allows counting words and brand numbers", async () => {
+    const { ungroundedNumbers } = await import("@/lib/engine");
+    const story = { title: "Google releases Gemini 4 Argon", summary: "", details: "Priced at $2 per million input tokens and $10 per million output tokens. Pro costs $19.99 a month.", url: "", source: "x", hash: "h" };
+    expect(ungroundedNumbers("It costs $10 a month and beats GPT by 30 percent.", story)).toEqual(["30"]);
+    expect(ungroundedNumbers("Gemini 4 is $19.99 for Pro, $2 per million input. 3 things to know.", story)).toEqual([]);
+    expect(ungroundedNumbers("This is AI in 30, episode 12.", story, "AI in 30 12")).toEqual([]);
+  });
+  it("parses Atom feeds", async () => {
+    const { parseAtom } = await import("@/lib/ai/trends");
+    const xml = `<feed><entry><title>OpenAI ships a new reasoning model today</title><link rel="alternate" href="https://example.com/a"/><published>2026-10-14T10:00:00Z</published><summary>Short summary</summary></entry></feed>`;
+    const [s] = parseAtom(xml, "theverge.com");
+    expect(s.url).toBe("https://example.com/a");
+    expect(s.title).toContain("reasoning model");
+  });
+});

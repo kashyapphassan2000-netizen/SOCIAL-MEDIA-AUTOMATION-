@@ -84,6 +84,8 @@ export interface Story {
   url: string;
   source: string;
   summary: string;
+  /** Article text fetched for fact-grounding (publisher links only). */
+  details?: string;
   publishedAt?: string;
   hash: string;
   viralityScore?: number;

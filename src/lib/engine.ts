@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { LLM_REGISTRY, generateJson, type LLM } from "./ai/llm";
 import { PICK_SYSTEM, SCRIPT_SYSTEM, pickUser, scriptUser, validateScript } from "./ai/prompts";
-import { fetchTrends, storyHash, type TrendFetcher } from "./ai/trends";
+import { decodeEntities, enrichStory, fetchTrends, storyHash, type TrendFetcher } from "./ai/trends";
 import { VOICE_REGISTRY, type VoiceProvider } from "./ai/voice";
 import { AVATAR_REGISTRY, type AvatarProvider } from "./ai/avatar";
 import { generateLook } from "./ai/looks";
@@ -27,11 +27,24 @@ export interface Deps {
   voices: (s: BrandSettings) => VoiceProvider[];
   avatars: (s: BrandSettings) => AvatarProvider[];
   trends: TrendFetcher;
+  enrich: (story: Story) => Promise<Story>;
   publishers: Record<Platform, Publisher>;
   generateLook: typeof generateLook;
   storage: () => Storage;
   findBroll: BrollFinder;
   firstComment: typeof postFirstComment;
+}
+
+/**
+ * Numbers the script states that appear nowhere in the source (title, summary, article text).
+ * Small free models invent prices and percentages; a wrong number on a brand channel costs trust.
+ */
+export function ungroundedNumbers(spoken: string, story: Story, allowed = ""): string[] {
+  const src = `${story.title} ${story.summary} ${story.details ?? ""} ${allowed}`.replace(/,(?=\d{3})/g, "");
+  const nums = spoken.replace(/,(?=\d{3})/g, "").match(/\d+(?:\.\d+)?/g) ?? [];
+  const ok = new Set(src.match(/\d+(?:\.\d+)?/g) ?? []);
+  // Small counting words ("2 things", "3 reasons") and the series episode are fine.
+  return [...new Set(nums.filter((n) => !ok.has(n) && !(Number(n) <= 10 && !n.includes("."))))];
 }
 
 const pick = <T,>(reg: Record<string, T>, order: string[]) => order.map((n) => reg[n]).filter((x): x is T => !!x);
@@ -47,6 +60,7 @@ export const defaultDeps: Deps = {
   // Clip mode puts the real-footage lip-sync providers first; photo providers remain as fallback.
   avatars: (s) => pick(AVATAR_REGISTRY, s.avatarMode === "clip" ? ["free-lipsync", "fal-lipsync-clip", ...s.avatarProviders] : s.avatarProviders),
   trends: fetchTrends,
+  enrich: enrichStory,
   publishers: PUBLISHERS,
   generateLook,
   storage: getStorage,
@@ -94,7 +108,8 @@ async function research(job: Job, s: BrandSettings): Promise<StageResult> {
       ? { ...candidates[data.index], viralityScore: data.viralityScore, angle: data.angle }
       : { title: data.evergreen!.title, summary: data.evergreen!.summary, url: "", source: "evergreen idea", hash: storyHash(data.evergreen!.title), angle: data.angle, viralityScore: data.viralityScore };
   await markStoryUsed(job.scheduleId, story.hash);
-  job.data.story = story;
+  job.data.story = await deps.enrich(story);
+  if (job.data.story.details) log(job, "info", `Read the article (${job.data.story.details.length} chars) to ground the script in real facts`);
   log(job, "info", `Picked (${provider}, score ${story.viralityScore ?? "?"}): ${story.title}`);
   return { next: "script" };
 }
@@ -104,19 +119,27 @@ async function script(job: Job, s: BrandSettings): Promise<StageResult> {
   const target = Math.min(58, Math.max(20, sched.targetSeconds || 32));
   const learned = await learnings(job.scheduleId).catch(() => null);
   const hookStyle = await chooseHookStyle(job.scheduleId, learned);
-  let episode: number | undefined;
-  if (sched.seriesName && sched.id) {
-    episode = (sched.episode ?? 0) + 1;
-    const fresh = await getSchedule(sched.id);
-    if (fresh) await saveSchedule({ ...fresh, episode });
-  }
+  // Episode number is committed only after a script succeeds (failed attempts must not skip numbers).
+  const episode = sched.seriesName && sched.id ? (sched.episode ?? 0) + 1 : undefined;
   const { data, provider, errors } = await generateJson(
     deps.llms(s),
     SCRIPT_SYSTEM,
     scriptUser({ ...sched, targetSeconds: target }, job.data.story!, s, { hookStyle, episode, learnings: learned }),
-    (v) => validateScript(v, target),
+    (v) => {
+      const sc = validateScript(v, target);
+      const invented = ungroundedNumbers(sc.spoken, job.data.story!, `${sched.seriesName ?? ""} ${episode ?? ""} ${s.signature} ${s.ctaText} ${s.brandPromise} ${target}`);
+      if (invented.length) throw new Error(`invented numbers not in the source: ${invented.join(", ")} — remove them or use only numbers from the article text`);
+      return sc;
+    },
   );
   if (errors.length) log(job, "warn", `LLM retries: ${errors.join(" | ")}`);
+  for (const k of ["title", "hook", "spoken", "description", "onScreenHook", "thumbnailText", "pinnedComment"] as const) {
+    if (typeof data[k] === "string") data[k] = decodeEntities(data[k] as string);
+  }
+  if (episode !== undefined) {
+    const fresh = await getSchedule(sched.id);
+    if (fresh) await saveSchedule({ ...fresh, episode });
+  }
   data.hookStyle = hookStyle;
   if (s.brandHashtag) {
     // Same brand tag on every post on every platform = searchable brand footprint.

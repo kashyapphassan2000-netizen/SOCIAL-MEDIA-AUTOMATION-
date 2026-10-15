@@ -2,7 +2,8 @@
 # with open-source model plugins (worker/plugins). GitHub runners have no GPU: they do voice (+ slow CPU avatars);
 # GPU kinds (lipsync, avatar) go to Kaggle when KAGGLE_* secrets exist.
 # Started automatically by the app (workflow_dispatch) when tasks are queued; the schedule is a safety net.
-# Repo secrets: APP_URL, WORKER_SECRET. Optional: KAGGLE_USERNAME + KAGGLE_KEY to render avatars on Kaggle's free GPU.
+# No repo secrets needed: APP_URL comes from .github/app-url (or the APP_URL secret) and the worker signs in with
+# GitHub OIDC (WORKER_SECRET still works). Optional: KAGGLE_USERNAME + KAGGLE_KEY to render avatars on Kaggle's free GPU.
 # Cost: free on public repos; private repos get 2,000 free minutes/month (voice ≈ 6 min/video).
 name: free-worker
 on:
@@ -13,6 +14,9 @@ on:
         default: "tts,lipsync,avatar"
   schedule:
     - cron: "23 */3 * * *"
+permissions:
+  contents: read
+  id-token: write
 concurrency:
   group: free-worker-${{ github.event.inputs.kinds || 'all' }}
   cancel-in-progress: false
@@ -61,7 +65,10 @@ jobs:
           WORKER_KINDS: ${{ needs.plan.outputs.kaggle == 'true' && 'tts' || needs.plan.outputs.kinds }}
           WORKER_NAME: gh-${{ github.run_id }}
           IDLE_EXIT_SEC: "240"
-        run: python worker/free_worker.py
+        run: |
+          export APP_URL="${APP_URL:-$(cat .github/app-url 2>/dev/null)}"
+          if [ -z "$APP_URL" ]; then echo "::warning::No APP_URL (secret or .github/app-url) yet"; exit 0; fi
+          python worker/free_worker.py
 
   kaggle:
     needs: plan

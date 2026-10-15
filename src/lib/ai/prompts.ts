@@ -83,7 +83,8 @@ Sign-off (use as the very last sentence, verbatim): "${brand.signature || brand.
 ${learn}
 Story: ${story.title}
 Source: ${story.source} ${story.url}
-Details: ${story.summary || "(headline only — do not invent specifics)"}
+Details: ${story.summary || "(none)"}
+${story.details ? `Article text (the ONLY source of facts, numbers, prices and dates):\n${story.details}` : "No article text available: speak ONLY about what the headline says. Use NO numbers, prices, percentages or dates beyond the headline."}
 Angle to take: ${story.angle || "your call"}
 
 Return JSON:

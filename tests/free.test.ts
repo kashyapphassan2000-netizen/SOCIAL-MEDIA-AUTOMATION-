@@ -99,6 +99,7 @@ describe("pipeline on the free stack (async voice + avatar via worker queue)", (
     await saveSettings({ ...s, generateLooks: false, voiceProviders: ["free-voice"], avatarProviders: ["free-avatar", "still"] });
     const { pubs } = mockPublishers({});
     setDeps({
+      enrich: async (st) => st,
       llms: () => [mockLLM()],
       voices: () => [VOICE_REGISTRY["free-voice"]],
       avatars: () => [AVATAR_REGISTRY["free-avatar"], AVATAR_REGISTRY.still],
@@ -156,6 +157,7 @@ describe("pipeline on the free stack (async voice + avatar via worker queue)", (
     await saveSettings({ ...s, avatarMode: "clip", generateLooks: false });
     const { pubs } = mockPublishers({});
     setDeps({
+      enrich: async (st) => st,
       llms: () => [mockLLM()],
       voices: () => [VOICE_REGISTRY["free-voice"]],
       avatars: () => [AVATAR_REGISTRY["free-lipsync"], AVATAR_REGISTRY["free-avatar"], AVATAR_REGISTRY.still],
@@ -202,6 +204,7 @@ describe("pipeline on the free stack (async voice + avatar via worker queue)", (
     await saveSettings({ ...s, generateLooks: false });
     const { pubs } = mockPublishers({});
     setDeps({
+      enrich: async (st) => st,
       llms: () => [mockLLM()],
       voices: () => [VOICE_REGISTRY["free-voice"]],
       avatars: () => [AVATAR_REGISTRY["free-avatar"], AVATAR_REGISTRY.still],

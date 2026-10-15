@@ -202,7 +202,11 @@ export async function generateJson<T>(
     if (!llm.available()) continue;
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const raw = await llm.complete(system, attempt ? `${user}\n\nIMPORTANT: respond with ONE valid JSON object only.` : user);
+        const prevErr = attempt ? errors[errors.length - 1]?.replace(/^[^:]+: /, "").slice(0, 300) : "";
+        const raw = await llm.complete(
+          system,
+          attempt ? `${user}\n\nIMPORTANT: your previous answer was rejected (${prevErr}). Fix that and respond with ONE valid JSON object only.` : user,
+        );
         return { data: validate(extractJson(raw)), provider: llm.name, errors };
       } catch (e) {
         errors.push(`${llm.name}#${attempt + 1}: ${(e as Error).message.slice(0, 300)}`);

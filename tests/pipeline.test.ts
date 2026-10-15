@@ -36,6 +36,7 @@ describe("full pipeline", () => {
     const fabric = mockAvatar("fabric", "ok");
     const { pubs, calls } = mockPublishers({ instagram: "async", x: "flaky", linkedin: "forbidden" });
     setDeps({
+      enrich: async (st) => st,
       llms: () => [llm],
       voices: () => [mockVoice("eleven", true), mockVoice("f5")],
       avatars: () => [omni, fabric, AVATAR_REGISTRY.still],
@@ -84,7 +85,8 @@ describe("full pipeline", () => {
     let captured: Buffer | null = null;
     pubs.youtube = { platform: "youtube", step: async (inp, prev) => ((captured = await inp.readVideo()), { ...prev, state: "done", url: "u" }) };
     const av = mockAvatar("a", "ok");
-    setDeps({ llms: () => [mockLLM()], voices: () => [mockVoice()], avatars: () => [av], trends, publishers: pubs, generateLook: async () => Buffer.alloc(0) });
+    setDeps({
+      enrich: async (st) => st, llms: () => [mockLLM()], voices: () => [mockVoice()], avatars: () => [av], trends, publishers: pubs, generateLook: async () => Buffer.alloc(0) });
     const s = await getSettings();
     await saveSettings({ ...s, generateLooks: false });
     const sch = schedule({ platforms: ["youtube"] });
@@ -110,7 +112,8 @@ describe("full pipeline", () => {
     const s = await getSettings();
     await saveSettings({ ...s, generateLooks: false });
     const { pubs } = mockPublishers({});
-    setDeps({ llms: () => [mockLLM()], voices: () => [mockVoice()], avatars: () => [AVATAR_REGISTRY.still], trends, publishers: pubs, generateLook: async () => Buffer.alloc(0) });
+    setDeps({
+      enrich: async (st) => st, llms: () => [mockLLM()], voices: () => [mockVoice()], avatars: () => [AVATAR_REGISTRY.still], trends, publishers: pubs, generateLook: async () => Buffer.alloc(0) });
     const sch = schedule({ platforms: ["youtube"] });
     await saveSchedule(sch);
     const done = await runUntilDone((await createJob(sch, "manual", "t")).id);
@@ -123,7 +126,8 @@ describe("full pipeline", () => {
     let privacy = false;
     const yt = pubs.youtube;
     pubs.youtube = { platform: "youtube", step: async (inp, prev) => ((privacy = inp.privateMode), yt.step(inp, prev)) };
-    setDeps({ llms: () => [mockLLM()], voices: () => [mockVoice()], avatars: () => [AVATAR_REGISTRY.still], trends, publishers: pubs, generateLook: async () => Buffer.alloc(0) });
+    setDeps({
+      enrich: async (st) => st, llms: () => [mockLLM()], voices: () => [mockVoice()], avatars: () => [AVATAR_REGISTRY.still], trends, publishers: pubs, generateLook: async () => Buffer.alloc(0) });
     const sch = schedule({ publishMode: "private" });
     await saveSchedule(sch);
     const done = await runUntilDone((await createJob(sch, "manual", "t")).id);
@@ -136,7 +140,8 @@ describe("full pipeline", () => {
 
   it("never publishes a stranger's voice: clone failure + generic disabled => job fails cleanly and is logged", async () => {
     const { pubs, calls } = mockPublishers({});
-    setDeps({ llms: () => [mockLLM()], voices: () => [mockVoice("eleven", true)], avatars: () => [AVATAR_REGISTRY.still], trends, publishers: pubs, generateLook: async () => Buffer.alloc(0) });
+    setDeps({
+      enrich: async (st) => st, llms: () => [mockLLM()], voices: () => [mockVoice("eleven", true)], avatars: () => [AVATAR_REGISTRY.still], trends, publishers: pubs, generateLook: async () => Buffer.alloc(0) });
     const sch = schedule();
     await saveSchedule(sch);
     const done = await runUntilDone((await createJob(sch, "manual", "t")).id);
@@ -149,7 +154,8 @@ describe("full pipeline", () => {
 
   it("missing photo fails with an actionable message", async () => {
     const { pubs } = mockPublishers({});
-    setDeps({ llms: () => [mockLLM()], voices: () => [mockVoice()], avatars: () => [AVATAR_REGISTRY.still], trends, publishers: pubs, generateLook: async () => Buffer.alloc(0) });
+    setDeps({
+      enrich: async (st) => st, llms: () => [mockLLM()], voices: () => [mockVoice()], avatars: () => [AVATAR_REGISTRY.still], trends, publishers: pubs, generateLook: async () => Buffer.alloc(0) });
     await saveAssets({});
     const sch = schedule();
     await saveSchedule(sch);
@@ -160,7 +166,8 @@ describe("full pipeline", () => {
 
   it("buffers sheet rows while Google is down and flushes later", async () => {
     const { pubs } = mockPublishers({});
-    setDeps({ llms: () => [mockLLM()], voices: () => [mockVoice()], avatars: () => [AVATAR_REGISTRY.still], trends, publishers: pubs, generateLook: async () => Buffer.alloc(0) });
+    setDeps({
+      enrich: async (st) => st, llms: () => [mockLLM()], voices: () => [mockVoice()], avatars: () => [AVATAR_REGISTRY.still], trends, publishers: pubs, generateLook: async () => Buffer.alloc(0) });
     sheet.fail = true;
     const sch = schedule({ platforms: ["youtube", "x"] });
     await saveSchedule(sch);
@@ -173,7 +180,8 @@ describe("full pipeline", () => {
 
   it("enqueues due schedules hourly, respects daily video cap and one-active-job-per-schedule", async () => {
     const { pubs } = mockPublishers({});
-    setDeps({ llms: () => [mockLLM()], voices: () => [mockVoice()], avatars: () => [AVATAR_REGISTRY.still], trends, publishers: pubs, generateLook: async () => Buffer.alloc(0) });
+    setDeps({
+      enrich: async (st) => st, llms: () => [mockLLM()], voices: () => [mockVoice()], avatars: () => [AVATAR_REGISTRY.still], trends, publishers: pubs, generateLook: async () => Buffer.alloc(0) });
     const s = await getSettings();
     await saveSettings({ ...s, maxVideosPerDay: 2 });
     await saveSchedule(schedule({ id: "a" }));
@@ -190,7 +198,8 @@ describe("full pipeline", () => {
 describe("preflight", () => {
   it("does not burn the daily cap when setup is incomplete, and says why", async () => {
     const { pubs } = mockPublishers({});
-    setDeps({ llms: () => [mockLLM()], voices: () => [mockVoice()], avatars: () => [AVATAR_REGISTRY.still], trends, publishers: pubs, generateLook: async () => Buffer.alloc(0) });
+    setDeps({
+      enrich: async (st) => st, llms: () => [mockLLM()], voices: () => [mockVoice()], avatars: () => [AVATAR_REGISTRY.still], trends, publishers: pubs, generateLook: async () => Buffer.alloc(0) });
     await saveAssets({});
     await saveSchedule(schedule());
     const r = await tick({ budgetSec: 1 });
