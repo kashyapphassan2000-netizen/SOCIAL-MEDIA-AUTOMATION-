@@ -9,7 +9,7 @@ const config: NextConfig = {
   ...(process.env.NEXT_STANDALONE ? { output: "standalone" as const } : {}),
   serverExternalPackages: ["ffmpeg-static"],
   // Never trace local data (your photo, voice, tokens), build output or tooling into a bundle.
-  outputFileTracingExcludes: { "*": [".data/**", "dist/**", "docs/**", "worker/**", "studio/**", "tests/**", "src/**", "*.xlsx"] },
+  outputFileTracingExcludes: { "*": ["./.data/**", "./dist/**", "./docs/**", "./worker/**", "./studio/**", "./tests/**", "./*.xlsx"] },
   outputFileTracingIncludes: {
     "/api/cron/tick": mediaFiles,
     "/api/jobs/run": mediaFiles,
