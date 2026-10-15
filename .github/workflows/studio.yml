@@ -52,8 +52,10 @@ jobs:
           $f.log -join "`n"
           if (-not $ok) { throw "bundled app server did not start" }
           $login = @{ email = $f.login.email; password = $f.login.password } | ConvertTo-Json
-          Invoke-RestMethod -Method Post -Uri http://127.0.0.1:3100/api/auth/login -ContentType "application/json" -Body $login -SessionVariable s | Out-Null
-          $health = Invoke-RestMethod -Uri http://127.0.0.1:3100/api/health -WebSession $s
+          # The session cookie is Secure (browsers accept that on 127.0.0.1; PowerShell's cookie jar does not), so pass it by hand.
+          $lr = Invoke-WebRequest -Method Post -Uri http://127.0.0.1:3100/api/auth/login -ContentType "application/json" -Body $login -UseBasicParsing
+          $cookie = (($lr.Headers["Set-Cookie"] | Select-Object -First 1) -split ";")[0]
+          $health = Invoke-RestMethod -Uri http://127.0.0.1:3100/api/health -Headers @{ Cookie = $cookie }
           $health.checks | Format-Table name, ok, detail -AutoSize | Out-String -Width 200
           $ff = $health.checks | Where-Object { $_.name -like "Video engine*" }
           if (-not $ff.ok) { throw "ffmpeg render failed in the bundled app: $($ff.detail)" }
