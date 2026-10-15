@@ -189,6 +189,8 @@ export interface Job {
   logs: JobLog[];
   sheetLogged?: boolean;
   exported?: boolean;
+  /** Final video kept because no platform accepted it. */
+  keptForDownload?: boolean;
 }
 
 export interface Look {

@@ -164,7 +164,7 @@ function JobCard({ j, open, toggle, t, reload }: { j: Job; open: boolean; toggle
           {j.data.story && <p className="small"><b>Story:</b> {j.data.story.title} {j.data.story.url && <a href={j.data.story.url} target="_blank" rel="noreferrer">source</a>} {j.data.story.viralityScore ? `· virality ${j.data.story.viralityScore}` : ""}</p>}
           {j.data.script && <p className="small"><b>Script:</b> {j.data.script.spoken}</p>}
           <p className="small muted">Look: {j.data.lookName ?? "–"} · Voice: {j.data.voiceProvider ?? "–"} · Avatar: {j.data.avatarProvider ?? "–"} · Edit: {j.data.editMode ?? "–"}</p>
-          {j.data.videoUrl && j.stage !== "done" && <video src={j.data.videoUrl} controls playsInline className="preview" style={{ width: 180 }} />}
+          {j.data.videoUrl && (j.stage !== "done" || j.keptForDownload) && <div><video src={j.data.videoUrl} controls playsInline className="preview" style={{ width: 180 }} />{j.keptForDownload && <div className="small"><a href={j.data.videoUrl} download>Download video</a> · not posted anywhere yet</div>}</div>}
           <div className="log">{j.logs.map((l, i) => <div key={i} className={l.level}>{new Date(l.t).toLocaleTimeString()} [{l.stage}] {l.msg}</div>)}</div>
         </>
       )}

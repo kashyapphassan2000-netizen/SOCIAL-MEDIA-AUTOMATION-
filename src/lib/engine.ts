@@ -567,11 +567,19 @@ async function cleanup(job: Job, s: BrandSettings): Promise<StageResult> {
     const left = new Date(hookAt).getTime() + WEBHOOK_MEDIA_HOLD_MIN * 60_000 - Date.now();
     if (left > 0) return { wait: Math.min(1800, Math.ceil(left / 1000)) };
   }
-  if (job.blobs.length) {
+  // Never lose a finished video: if it reached no platform, keep the final video + thumbnail for download.
+  const delivered = Object.values(job.data.publish ?? {}).some((r) => r?.state === "done");
+  const keep = !delivered && job.data.videoUrl ? [job.data.videoUrl, job.data.thumbnailUrl].filter((u): u is string => !!u) : [];
+  if (keep.length && !job.keptForDownload) {
+    job.keptForDownload = true;
+    log(job, "warn", "No platform accepted this video — kept it for download in the dashboard (connect a platform to post automatically)");
+  }
+  const toDelete = job.blobs.filter((u) => !keep.includes(u));
+  if (toDelete.length) {
     try {
-      await deps.storage().del(job.blobs);
-      log(job, "info", `Deleted ${job.blobs.length} generated files`);
-      job.blobs = [];
+      await deps.storage().del(toDelete);
+      log(job, "info", `Deleted ${toDelete.length} generated files`);
+      job.blobs = job.blobs.filter((u) => keep.includes(u));
     } catch (e) {
       log(job, "warn", `Cleanup delete failed (will retry): ${(e as Error).message}`);
       throw e;
