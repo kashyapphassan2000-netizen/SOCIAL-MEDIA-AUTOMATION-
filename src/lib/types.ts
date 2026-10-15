@@ -185,6 +185,7 @@ export interface Job {
   blobs: string[];
   logs: JobLog[];
   sheetLogged?: boolean;
+  exported?: boolean;
 }
 
 export interface Look {

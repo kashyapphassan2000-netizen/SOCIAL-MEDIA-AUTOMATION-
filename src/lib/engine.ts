@@ -399,7 +399,8 @@ async function publish(job: Job, s: BrandSettings): Promise<StageResult> {
   const pub = job.data.publish;
   for (const p of job.platforms) {
     if (pub[p]) continue;
-    if (job.publishMode === "private" && p !== "youtube") pub[p] = { state: "skipped", attempts: 0, error: "private test mode" };
+    if (process.env.PUBLISH_HANDOFF) pub[p] = { state: "skipped", attempts: 0, error: "handed off to external publisher (EXPORT_DIR)" };
+    else if (job.publishMode === "private" && p !== "youtube") pub[p] = { state: "skipped", attempts: 0, error: "private test mode" };
     else if (await platformCapReached(p, s)) pub[p] = { state: "skipped", attempts: 0, error: `daily cap ${s.dailyPlatformCaps[p]} reached` };
     else pub[p] = { state: "pending", attempts: 0 };
   }
@@ -455,7 +456,32 @@ async function publish(job: Job, s: BrandSettings): Promise<StageResult> {
   return { wait: Math.max(5, Math.round((soonest - Date.now()) / 1000)) };
 }
 
+/**
+ * Hand the finished short to an outside publisher (e.g. a scheduled agent posting through connected accounts):
+ * <EXPORT_DIR>/<jobId>/{video.mp4, thumbnail.jpg, post.json}. Runs before cleanup deletes the media.
+ */
+async function exportForHandoff(job: Job) {
+  const dir = process.env.EXPORT_DIR;
+  if (!dir || !job.data.videoUrl || !job.data.script) return;
+  const fs = await import("node:fs/promises");
+  const path = await import("node:path");
+  const out = path.join(dir, job.id);
+  await fs.mkdir(out, { recursive: true });
+  await fs.writeFile(path.join(out, "video.mp4"), await deps.storage().read(job.data.videoUrl));
+  if (job.data.thumbnailUrl) await fs.writeFile(path.join(out, "thumbnail.jpg"), await deps.storage().read(job.data.thumbnailUrl)).catch(() => undefined);
+  const sc = job.data.script;
+  await fs.writeFile(
+    path.join(out, "post.json"),
+    JSON.stringify({ jobId: job.id, topic: job.topic, story: job.data.story, title: sc.title, description: sc.description, hashtags: sc.hashtags, captions: sc.captions, pinnedComment: sc.pinnedComment, platforms: job.platforms, publishMode: job.publishMode }, null, 2),
+  );
+  log(job, "info", `Exported for publishing: ${out}`);
+}
+
 async function cleanup(job: Job, s: BrandSettings): Promise<StageResult> {
+  if (!job.exported) {
+    await exportForHandoff(job);
+    job.exported = true;
+  }
   if (job.blobs.length) {
     try {
       await deps.storage().del(job.blobs);

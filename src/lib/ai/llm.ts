@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { HttpFailure, httpJson } from "../http";
+import { HttpFailure, httpJson, sleep } from "../http";
 
 export interface LLM {
   name: string;
@@ -134,15 +134,25 @@ export class OpenAICompatLLM implements LLM {
   }
   async complete(system: string, user: string) {
     const model = await this.model();
-    const r = await httpJson<any>(`${this.base}/chat/completions`, {
-      method: "POST",
-      headers: this.headers(),
-      body: JSON.stringify({ model, messages: [{ role: "system", content: system }, { role: "user", content: user }], temperature: 0.8, max_tokens: 4000 }),
-      timeoutMs: 120_000,
-    });
-    const text = r.choices?.[0]?.message?.content;
-    if (!text) throw new Error(`${this.name} (${model}) returned no content`);
-    return text;
+    // Keyless tiers rate-limit per IP (answered as 402/429): back off and retry instead of failing the stage.
+    const tries = this.keyless ? 3 : 1;
+    for (let i = 1; ; i++) {
+      try {
+        const r = await httpJson<any>(`${this.base}/chat/completions`, {
+          method: "POST",
+          headers: this.headers(),
+          body: JSON.stringify({ model, messages: [{ role: "system", content: system }, { role: "user", content: user }], temperature: 0.8, max_tokens: 4000 }),
+          timeoutMs: 120_000,
+          retries: this.keyless ? 0 : undefined,
+        });
+        const text = r.choices?.[0]?.message?.content;
+        if (!text) throw new Error(`${this.name} (${model}) returned no content`);
+        return text;
+      } catch (e) {
+        if (i >= tries) throw e;
+        await sleep(15_000);
+      }
+    }
   }
 }
 
@@ -157,7 +167,7 @@ export const LLM_REGISTRY: Record<string, LLM> = {
   nvidia: new OpenAICompatLLM("nvidia", "https://integrate.api.nvidia.com/v1", "NVIDIA_API_KEY", "NVIDIA_MODEL", BIG),
   // ---- no key at all: last resort so a fresh deploy can write scripts before any key is added ----
   pollinations: new OpenAICompatLLM("pollinations", "https://text.pollinations.ai/openai", "POLLINATIONS_TOKEN", "POLLINATIONS_MODEL", [], {
-    model: "openai",
+    model: "openai-fast", // the only model the anonymous tier serves
     disableEnv: "DISABLE_POLLINATIONS",
   }),
   // ---- paid ----
