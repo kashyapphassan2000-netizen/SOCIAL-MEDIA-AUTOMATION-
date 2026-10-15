@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { buildOverlayAss, buildThumbnailAss } from "./captions";
-import { fontsDir, probeDuration, runFfmpeg } from "./ffmpeg";
+import { filterPath, fontsDir, probeDuration, runFfmpeg } from "./ffmpeg";
 import type { WordTiming } from "../types";
 
 export interface EditInput {
@@ -37,7 +37,6 @@ export interface EditOutput {
   mode: string;
 }
 
-const filterPath = (p: string) => p.replace(/\\/g, "/").replace(/:/g, "\\:").replace(/'/g, "\\'");
 
 interface Profile {
   name: string;

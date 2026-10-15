@@ -5,6 +5,9 @@ import path from "node:path";
 
 let cached: string | null = null;
 
+/** A file path inside an ffmpeg filter argument: forward slashes, escaped ':' (Windows "C:") and quotes. */
+export const filterPath = (p: string) => p.replace(/\\/g, "/").replace(/:/g, "\\:").replace(/'/g, "\\'");
+
 export function ffmpegPath(): string {
   if (cached) return cached;
   if (process.env.FFMPEG_PATH) return (cached = process.env.FFMPEG_PATH);

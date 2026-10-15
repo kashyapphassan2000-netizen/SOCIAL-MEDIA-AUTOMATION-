@@ -105,3 +105,11 @@ describe("fact grounding", () => {
     expect(s.title).toContain("reasoning model");
   });
 });
+
+describe("ffmpeg filter paths", () => {
+  it("escapes Windows drive letters and backslashes", async () => {
+    const { filterPath } = await import("@/lib/media/ffmpeg");
+    expect(filterPath("C:\\Users\\me\\AppData\\cap.ass")).toBe("C\\:/Users/me/AppData/cap.ass");
+    expect(filterPath("/tmp/it's.ass")).toBe("/tmp/it\\'s.ass");
+  });
+});

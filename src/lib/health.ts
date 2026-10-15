@@ -3,7 +3,7 @@ import { getAssets, getSettings, listConnections } from "./db";
 import { getStorage } from "./storage";
 import fs from "node:fs";
 import path from "node:path";
-import { ffmpegPath, fontsDir, rmrf, runFfmpeg, tmpDir } from "./media/ffmpeg";
+import { ffmpegPath, filterPath, fontsDir, rmrf, runFfmpeg, tmpDir } from "./media/ffmpeg";
 import { buildThumbnailAss } from "./media/captions";
 import { googleAccessToken, linkedinAccessToken, metaToken, pinterestToken, xAccessToken } from "./connections";
 import { queueStats } from "./freeworker";
@@ -53,7 +53,7 @@ export async function runHealth(): Promise<Check[]> {
         const ass = path.join(dir, "t.ass");
         fs.writeFileSync(ass, buildThumbnailAss("OK", "@test", "#000000", "#FFD60A", 270, 480));
         const t0 = Date.now();
-        await runFfmpeg(["-y", "-f", "lavfi", "-i", "color=c=0x222222:s=270x480:d=1", "-vf", `subtitles=${ass}:fontsdir=${fontsDir()}`, "-frames:v", "1", path.join(dir, "o.png")], 30_000);
+        await runFfmpeg(["-y", "-f", "lavfi", "-i", "color=c=0x222222:s=270x480:d=1", "-vf", `subtitles='${filterPath(ass)}':fontsdir='${filterPath(fontsDir())}'`, "-frames:v", "1", path.join(dir, "o.png")], 30_000);
         return `${ffmpegPath()} — captioned frame rendered in ${Date.now() - t0}ms`;
       } finally {
         rmrf(dir);
