@@ -1,0 +1,11 @@
+# Never upload local data (your photo/voice/tokens), build output or tooling to Vercel.
+.data
+.env*
+dist
+.next
+node_modules
+docs
+tests
+studio
+worker
+*.xlsx
