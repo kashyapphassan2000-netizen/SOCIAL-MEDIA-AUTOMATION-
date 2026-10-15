@@ -50,3 +50,37 @@ describe("original music", () => {
     expect(findReHook(words.slice(0, 5), 2)).toBeUndefined();
   });
 });
+
+describe("explainer layout (face box bottom-right)", () => {
+  it("renders scenes on the brand canvas with the face in a bordered box", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const { renderShort, PROFILES, pipGeometry } = await import("@/lib/media/editor");
+    const { runFfmpeg, tmpDir } = await import("@/lib/media/ffmpeg");
+    const dir = tmpDir();
+    const face = path.join(dir, "face.png");
+    const voice = path.join(dir, "v.wav");
+    await runFfmpeg(["-y", "-f", "lavfi", "-i", "color=c=0x00C000:s=720x1280:d=0.04", "-frames:v", "1", face]);
+    await runFfmpeg(["-y", "-f", "lavfi", "-i", "sine=f=220:d=6", voice]);
+    const words = "this is a quick test of the explainer layout with a face box".split(" ").map((w, i) => ({ word: w, start: i * 0.4, end: i * 0.4 + 0.35 }));
+    const prof = PROFILES[1];
+    const out = await renderShort({
+      workDir: dir, visualPath: face, isStill: true, audioPath: voice, musicVolume: 0, layout: "pip",
+      scenes: [{ start: 0, end: 3, point: "First point", visual: false }, { start: 3, end: 6, point: "Second point", visual: false }],
+      words, hook: "", handle: "@t", cta: "", primary: "#0B1F3A", accent: "#FFD400", text: "#FFFFFF", thumbnailText: "t", broll: [], emphasis: [],
+    }, prof);
+    const g = pipGeometry(prof.w, prof.h);
+    const px = async (x: number, y: number) => {
+      const raw = path.join(dir, `p${x}-${y}.raw`);
+      await runFfmpeg(["-y", "-ss", "4", "-i", out.videoPath, "-vf", `crop=2:2:${x - (x % 2)}:${y - (y % 2)}`, "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", raw]);
+      return [...fs.readFileSync(raw)];
+    };
+    const [r, gr, b] = await px(g.x + g.w / 2, g.y + g.h / 2); // inside the box: the (green) face
+    expect(gr).toBeGreaterThan(150);
+    expect(r + b).toBeLessThan(120);
+    const [br, bg] = await px(g.x + g.w / 2, g.y - Math.ceil(g.b / 2)); // border: accent yellow
+    expect(br).toBeGreaterThan(180);
+    expect(bg).toBeGreaterThan(150);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }, 300_000);
+});

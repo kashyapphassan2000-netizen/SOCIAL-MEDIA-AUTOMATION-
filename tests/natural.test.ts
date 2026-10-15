@@ -65,7 +65,7 @@ describe("natural edit", () => {
       firstComment: async (p, id, text) => (comments.push(`${p}:${text}`), true),
     });
     const s = await getSettings();
-    await saveSettings({ ...s, generateLooks: false, brandHashtag: "KashyapAI", signature: "I'm Kashyap. Follow for your daily AI edge." });
+    await saveSettings({ ...s, generateLooks: false, layout: "face", brandHashtag: "KashyapAI", signature: "I'm Kashyap. Follow for your daily AI edge." });
     const sch = schedule({ platforms: ["youtube", "x"], seriesName: "AI in 30", targetSeconds: 32 });
     await saveSchedule(sch);
     const job = await createJob(sch, "manual", "t");

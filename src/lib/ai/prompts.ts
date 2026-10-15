@@ -31,6 +31,8 @@ Retention structure (non-negotiable):
 4. PAYOFF: the creator's own opinion / prediction — original commentary is what keeps the channel monetisable under "inauthentic / reused content" rules.
 5. LOOP ENDING: the last sentence should flow naturally back into the first line when the short replays, OR end with a pointed question that begs a comment. Then the sign-off.
 
+Plain language (most important): explain it so a 15-year-old or your non-tech uncle gets it on the first listen. No jargon; if a technical word is unavoidable, explain it in the same breath ("tokens, basically the words the AI reads"). Turn every number into something people can feel ("about the price of a chai for a thousand pages"). One idea per sentence. Say what it means for the viewer's life, job or money.
+Natural speech: write how people actually talk — short sentences, "so", "basically", "honestly", "right?", a natural pause with a comma or "...", never a list read out loud, never formal written English.
 Entertainment (people should watch the creator for the creator, not just the news): talk like you are excitedly telling a smart friend something over chai — personality, a light joke or playful exaggeration where it fits, ONE vivid everyday analogy (especially Indian context: cricket, chai, traffic, exams, jugaad), a rhetorical question to the viewer, and a confident opinion. Vary sentence length: short punch, longer explanation, short punch.
 Re-hook wording: use one of these phrases at the start of the re-hook sentence so the edit can drop the music there: "But here's the part nobody's talking about", "But here's the crazy part", "But wait".
 Voice: spoken, punchy, contractions, one idea per sentence, sounds like a smart friend not a news anchor. Plain words only in "spoken": no emojis, hashtags, URLs, brackets, stage directions, markdown. Write numbers as they are said.
@@ -94,7 +96,7 @@ Return JSON:
 {
   "hook": "first spoken sentence (max 10 words)",
   "spoken": "the full spoken script INCLUDING the hook first and the sign-off last",
-  "beats": [{"text": "the exact sentence(s) from spoken for this beat", "broll": "2-4 word stock-footage search query that visually illustrates it (concrete nouns, no text)", "emphasis": "ONE key word from this beat to highlight on screen"}],
+  "beats": [{"text": "the exact sentence(s) from spoken for this beat", "broll": "2-4 word stock-footage search query that visually illustrates it (concrete nouns, no text)", "emphasis": "ONE key word from this beat to highlight on screen", "onScreen": "2-5 word plain-English key point shown big on screen for this beat (e.g. \"Google's new AI is here\", \"Cheaper than a samosa\")"}],
   "onScreenHook": "2-6 word on-screen text for the first 3 seconds (complements, not repeats, the spoken hook)",
   "title": "max 70 chars, curiosity + searchable keyword, delivered on by the video",
   "description": "generic 1-2 sentence description",
@@ -154,7 +156,7 @@ export function validateScript(v: unknown, targetSeconds: number): Script {
       ? o.beats
           .filter((b: any) => b && typeof b.text === "string")
           .slice(0, 6)
-          .map((b: any) => ({ text: cleanSpoken(String(b.text)), broll: String(b.broll ?? "").slice(0, 60), emphasis: String(b.emphasis ?? "").replace(/[^\p{L}\p{N}'-]/gu, "").slice(0, 24) }))
+          .map((b: any) => ({ text: cleanSpoken(String(b.text)), broll: String(b.broll ?? "").slice(0, 60), emphasis: String(b.emphasis ?? "").replace(/[^\p{L}\p{N}'-]/gu, "").slice(0, 24), onScreen: typeof b.onScreen === "string" ? b.onScreen.replace(/[#*_]/g, "").trim().slice(0, 48) || undefined : undefined }))
       : [],
     pinnedComment: typeof o.pinnedComment === "string" ? o.pinnedComment.trim().slice(0, 300) : undefined,
   };

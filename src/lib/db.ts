@@ -50,6 +50,7 @@ export const DEFAULT_SETTINGS: BrandSettings = {
   musicUrl: "",
   musicVolume: 0.14,
   musicMode: "auto",
+  layout: "pip",
   denoise: true,
   // Free first; paid providers only kick in if their key is set (and the free path fails).
   avatarProviders: ["free-avatar", "fal-omnihuman", "fal-fabric", "still"],

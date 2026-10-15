@@ -91,6 +91,9 @@ export interface OverlayOpts {
   width?: number;
   height?: number;
   emphasis?: string[];
+  /** pip: captions move to mid-screen (your face box sits bottom-right) and key-point cards show at the top. */
+  layout?: "pip" | "face";
+  points?: { start: number; end: number; point: string; visual?: boolean }[];
 }
 
 /** Full-video ASS: hook banner, karaoke word captions, handle watermark, end-card CTA. */
@@ -127,6 +130,16 @@ export function buildOverlayAss(o: OverlayOpts): string {
       lines.push(`Dialogue: 1,${assTime(start)},${assTime(end)},Cap,,0,0,0,,${text}`);
     }
   }
+  if (o.layout === "pip") {
+    // One big plain-English point per scene: pops in, stays while that sentence plays.
+    for (const p of o.points ?? []) {
+      const start = Math.max(p.start, o.hook ? hookEnd : 0);
+      const end = Math.min(p.end, o.duration - 2.6);
+      if (!p.point || end - start < 0.6) continue;
+      // No stock visual for this scene: the point itself becomes the visual, big and centred.
+      lines.push(`Dialogue: 2,${assTime(start)},${assTime(end)},${p.visual === false ? "Big" : "Point"},,0,0,0,,{\\fad(90,120)\\fscx80\\fscy80\\t(0,140,\\fscx100\\fscy100)}${assEscape(p.point.toUpperCase())}`);
+    }
+  }
   if (o.handle) lines.push(`Dialogue: 0,${assTime(0)},${assTime(o.duration)},Handle,,0,0,0,,${assEscape(o.handle)}`);
   const ctaStart = Math.max(hookEnd, o.duration - 2.6);
   if (o.cta && o.duration > 6) {
@@ -141,7 +154,11 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Cap,Montserrat ExtraBold,${fs(88)},${white},${white},${black},${assColor("#000000", 0x60)},-1,0,0,0,100,100,0,0,1,${fs(7)},${fs(3)},2,${fs(70)},${fs(70)},${fs(560)},1
+${o.layout === "pip"
+  ? `Style: Cap,Montserrat ExtraBold,${fs(80)},${white},${white},${black},${assColor("#000000", 0x60)},-1,0,0,0,100,100,0,0,1,${fs(7)},${fs(3)},8,${fs(70)},${fs(70)},${fs(780)},1`
+  : `Style: Cap,Montserrat ExtraBold,${fs(88)},${white},${white},${black},${assColor("#000000", 0x60)},-1,0,0,0,100,100,0,0,1,${fs(7)},${fs(3)},2,${fs(70)},${fs(70)},${fs(560)},1`}
+Style: Big,Montserrat ExtraBold,${fs(104)},${white},${white},${black},${assColor("#000000", 0x70)},-1,0,0,0,100,100,0,0,1,${fs(6)},${fs(4)},8,${fs(80)},${fs(80)},${fs(330)},1
+Style: Point,Montserrat ExtraBold,${fs(66)},${assColor("#111111")},${assColor("#111111")},${accent},${accent},-1,0,0,0,100,100,0,0,3,${fs(20)},0,8,${fs(90)},${fs(90)},${fs(250)},1
 Style: Hook,Montserrat ExtraBold,${fs(64)},${white},${white},${primary},${primary},-1,0,0,0,100,100,0,0,3,${fs(22)},0,8,${fs(80)},${fs(80)},${fs(250)},1
 Style: Handle,Montserrat ExtraBold,${fs(36)},${dim},${dim},${assColor("#000000", 0x90)},${black},-1,0,0,0,100,100,0,0,1,${fs(2)},0,9,${fs(40)},${fs(48)},${fs(120)},1
 Style: Cta,Montserrat ExtraBold,${fs(60)},${primary},${primary},${accent},${accent},-1,0,0,0,100,100,0,0,3,${fs(26)},0,5,${fs(90)},${fs(90)},0,1

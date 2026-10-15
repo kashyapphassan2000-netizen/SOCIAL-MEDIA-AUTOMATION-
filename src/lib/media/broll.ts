@@ -60,6 +60,33 @@ export function planCutaways(script: Script, words: WordTiming[], duration: numb
   return out;
 }
 
+export interface Scene extends Cutaway {
+  /** Big plain-English key point shown while this scene plays. */
+  point: string;
+}
+
+/**
+ * Explainer layout: one scene per beat covering the WHOLE video (no gaps), each with its own visual and key point.
+ * The first scene starts at 0 (under the hook), the last runs to the end.
+ */
+export function planScenes(script: Script, words: WordTiming[], duration: number): Scene[] {
+  const out: Scene[] = [];
+  let cursor = 0;
+  for (const b of script.beats ?? []) {
+    const loc = locate(b.text, words, cursor);
+    if (!loc) continue;
+    const [s, , next] = loc;
+    cursor = next;
+    const point = (b.onScreen || b.emphasis || "").trim();
+    if (out.length && s - out[out.length - 1].start < 1.5) continue; // too short to read
+    out.push({ start: +s.toFixed(2), end: 0, query: b.broll || script.title, point });
+  }
+  if (!out.length) out.push({ start: 0, end: 0, query: script.title, point: "" });
+  out[0].start = 0;
+  for (let i = 0; i < out.length; i++) out[i].end = +(i + 1 < out.length ? out[i + 1].start : duration).toFixed(2);
+  return out.filter((x) => x.end - x.start > 0.4);
+}
+
 async function pexels(query: string): Promise<{ url: string; kind: "video" } | null> {
   const key = process.env.PEXELS_API_KEY;
   if (!key) return null;

@@ -12,7 +12,7 @@ import { PUBLISHERS, isPermanent, postFirstComment, type Publisher } from "./pub
 import { ReauthRequired } from "./connections";
 import { estimateWordTimings } from "./media/captions";
 import { PROFILES, planPunchIns, renderShort } from "./media/editor";
-import { findBroll, planCutaways, type BrollFinder } from "./media/broll";
+import { findBroll, planCutaways, planScenes, type BrollFinder } from "./media/broll";
 import { moodFor, seedFrom, snapToBeat, synthMusic, tempoOf } from "./media/music";
 import { imageExt, probeDuration, rmrf, runFfmpeg, tmpDir } from "./media/ffmpeg";
 import { getStorage, type Storage } from "./storage";
@@ -331,8 +331,15 @@ async function avatar(job: Job, s: BrandSettings): Promise<StageResult> {
 /** Fetch 2-3 relevant B-roll cutaways. Never fatal: a short without B-roll still ships. */
 async function brollStage(job: Job, s: BrandSettings): Promise<StageResult> {
   const sc = job.data.script!;
-  if (!s.broll || !sc.beats?.length || !job.data.words?.length) return { next: "edit" };
-  const plan = planCutaways(sc, job.data.words, job.data.audioSeconds ?? 0);
+  if (!sc.beats?.length || !job.data.words?.length) return { next: "edit" };
+  const pip = (s.layout ?? "pip") === "pip";
+  if (pip) {
+    // Explainer layout: a scene per beat; stock visuals where available, branded animated cards otherwise.
+    const scenes = planScenes(sc, job.data.words, job.data.audioSeconds ?? 0);
+    job.data.scenes = scenes.map(({ start, end, point, query }) => ({ start, end, point, query }));
+  }
+  if (!s.broll) return { next: "edit" };
+  const plan = pip ? (job.data.scenes ?? []) : planCutaways(sc, job.data.words, job.data.audioSeconds ?? 0);
   const storage = deps.storage();
   const got: NonNullable<Job["data"]["broll"]> = [];
   for (const c of plan) {
@@ -371,7 +378,7 @@ async function edit(job: Job, s: BrandSettings): Promise<StageResult> {
       try {
         const p = path.join(dir, `broll-${i}.${b.kind === "video" ? "mp4" : "jpg"}`);
         fs.writeFileSync(p, await storage.read(b.url));
-        const start = onBeat(b.start);
+        const start = s.layout === "face" ? onBeat(b.start) : b.start; // explainer scenes must stay contiguous
         broll.push({ path: p, kind: b.kind, start, end: start + (b.end - b.start) });
       } catch {
         /* skip a missing cutaway */
@@ -384,6 +391,8 @@ async function edit(job: Job, s: BrandSettings): Promise<StageResult> {
       primary: s.primaryColor, accent: s.accentColor, text: s.textColor, thumbnailText: sc.thumbnailText,
       broll, punchIns: s.punchIns && !still ? planPunchIns(words, job.data.audioSeconds ?? 0).map(([a, b]) => [onBeat(a), b] as [number, number]).filter(([a, b]) => b - a > 0.6) : [], sfx: s.sfx,
       emphasis: (sc.beats ?? []).map((b) => b.emphasis).filter(Boolean),
+      layout: s.layout ?? "pip",
+      scenes: job.data.scenes?.map((sc2) => ({ ...sc2, visual: broll.some((b) => b.start < sc2.end && b.end > sc2.start) })),
     };
     let out: { videoPath: string; thumbPath: string; mode: string } | null = null;
     for (const prof of PROFILES) {

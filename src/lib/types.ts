@@ -104,7 +104,7 @@ export interface Script {
   thumbnailText: string;
   cta: string;
   /** Script segments with B-roll search terms and the word to emphasise on screen. */
-  beats?: { text: string; broll: string; emphasis: string }[];
+  beats?: { text: string; broll: string; emphasis: string; onScreen?: string }[];
   /** First comment the creator posts to start the conversation. */
   pinnedComment?: string;
   hookStyle?: string;
@@ -179,6 +179,8 @@ export interface Job {
     avatarUrl?: string;
     avatarProvider?: string;
     broll?: { url: string; kind: "video" | "image"; start: number; end: number; query: string; source: string }[];
+    /** Explainer layout: every scene (with or without a stock visual) and its on-screen key point. */
+    scenes?: { start: number; end: number; point: string; query: string }[];
     videoUrl?: string;
     thumbnailUrl?: string;
     editMode?: string;
@@ -222,6 +224,8 @@ export interface BrandSettings {
   musicVolume: number;
   /** auto = your library tracks if uploaded, else original generated music; generated; library; off. */
   musicMode: "auto" | "generated" | "library" | "off";
+  /** pip = explainer visuals full-screen + your face in a box (bottom-right); face = your face full-screen. */
+  layout: "pip" | "face";
   /** Noise reduction + compression on the voice. */
   denoise: boolean;
   avatarProviders: string[];

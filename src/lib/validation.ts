@@ -47,6 +47,7 @@ export const settingsInput = z.object({
   musicUrl: z.string().max(500),
   musicVolume: z.number().min(0).max(1),
   musicMode: z.enum(["auto", "generated", "library", "off"]).default("auto"),
+  layout: z.enum(["pip", "face"]).default("pip"),
   denoise: z.boolean().default(true),
   avatarProviders: z.array(z.string()).min(1),
   voiceProviders: z.array(z.string()).min(1),
