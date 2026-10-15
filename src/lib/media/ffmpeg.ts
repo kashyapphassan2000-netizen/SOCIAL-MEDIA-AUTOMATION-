@@ -82,6 +82,50 @@ export async function extractVoice(input: string, out: string, maxSec = 120) {
   await runFfmpeg(["-y", "-i", input, "-vn", "-ac", "1", "-ar", "44100", "-t", String(maxSec), "-af", "highpass=f=70,afftdn=nf=-25:tn=1,loudnorm=I=-16:TP=-1.5", "-c:a", "libmp3lame", "-b:a", "160k", out]);
 }
 
+/**
+ * Pick the liveliest stretch of a recording for voice cloning: the clone copies the reference's energy and
+ * pacing, so a flat or pause-heavy slice gives a flat, robotic clone. Scores each window by loudness, the share
+ * of time actually speaking, and pitch/volume movement (expressiveness), and returns its start in seconds.
+ */
+export async function liveliestWindow(input: string, windowSec = 12): Promise<number> {
+  const raw = await new Promise<Buffer>((resolve, reject) => {
+    const p = spawn(/*turbopackIgnore: true*/ ffmpegPath(), ["-hide_banner", "-nostdin", "-i", input, "-vn", "-ac", "1", "-ar", "8000", "-f", "s16le", "-"], { stdio: ["ignore", "pipe", "ignore"] });
+    const chunks: Buffer[] = [];
+    p.stdout.on("data", (c) => chunks.push(c));
+    p.on("error", reject);
+    p.on("close", () => resolve(Buffer.concat(chunks)));
+  });
+  const frame = 800; // 100 ms at 8 kHz
+  const rms: number[] = [];
+  for (let i = 0; i + frame * 2 <= raw.length; i += frame * 2) {
+    let s = 0;
+    for (let j = 0; j < frame; j++) {
+      const v = raw.readInt16LE(i + j * 2) / 32768;
+      s += v * v;
+    }
+    rms.push(Math.sqrt(s / frame));
+  }
+  const n = Math.round(windowSec * 10);
+  if (rms.length <= n) return 0;
+  const sorted = [...rms].sort((a, b) => a - b);
+  const silence = sorted[Math.floor(sorted.length * 0.15)] * 1.8 + 1e-4;
+  let best = 0;
+  let bestScore = -1;
+  for (let st = 0; st + n <= rms.length; st += 5) {
+    const w = rms.slice(st, st + n);
+    const voiced = w.filter((x) => x > silence);
+    if (voiced.length < n * 0.5) continue;
+    const mean = voiced.reduce((a, b) => a + b, 0) / voiced.length;
+    const sd = Math.sqrt(voiced.reduce((a, b) => a + (b - mean) ** 2, 0) / voiced.length);
+    const score = (voiced.length / n) * mean * (1 + sd / mean); // talking a lot, clearly, with movement
+    if (score > bestScore) {
+      bestScore = score;
+      best = st / 10;
+    }
+  }
+  return best;
+}
+
 /** File extension from magic bytes — ffmpeg's image demuxer trusts the extension. */
 export function imageExt(buf: Buffer): "png" | "webp" | "jpg" {
   if (buf.length > 4 && buf[0] === 0x89 && buf.toString("ascii", 1, 4) === "PNG") return "png";

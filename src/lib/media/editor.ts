@@ -180,7 +180,9 @@ export async function renderShort(inp: EditInput, profile: Profile, timeoutMs = 
   const norm = profile.loudnorm ? ",loudnorm=I=-14:TP=-1.5:LRA=11" : "";
   const mix: string[] = [];
   // Voice: rumble cut, adaptive noise reduction (room hiss / hum / TTS artefacts), gentle broadcast compression.
-  const clean = inp.denoise === false ? "" : "highpass=f=80,afftdn=nf=-25:tn=1,acompressor=threshold=-20dB:ratio=3:attack=5:release=80:makeup=2,";
+  // Noise reduction belongs on your recorded reference (done at upload); on generated speech it adds a metallic,
+  // "AI" edge. Here only a rumble cut and gentle compression so the voice sits forward like a real mic.
+  const clean = inp.denoise === false ? "" : "highpass=f=80,acompressor=threshold=-21dB:ratio=2.5:attack=8:release=120:makeup=2,";
   f.push(`[${iAud}:a]aresample=44100,${clean}aformat=channel_layouts=stereo${iMus >= 0 ? ",asplit=2[voice][vkey]" : "[voice]"}`);
   mix.push("[voice]");
   if (iMus >= 0) {

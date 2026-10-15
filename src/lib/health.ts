@@ -92,6 +92,10 @@ export async function runHealth(): Promise<Check[]> {
       const n = await flushSheet();
       return `connected (flushed ${n} buffered rows)`;
     }, "Settings → paste the Sheet ID; connect Google (or share the sheet with the service account)"),
+    check("Explainer visuals (stock video)", async () => {
+      if (process.env.PEXELS_API_KEY || process.env.PIXABAY_API_KEY) return `${process.env.PEXELS_API_KEY ? "Pexels" : "Pixabay"} key set — every scene gets a real video`;
+      throw new Error("no PEXELS_API_KEY — scenes use text on a brand background instead of real footage");
+    }, "Free key in 1 minute: pexels.com/api → Your API key; add it as PEXELS_API_KEY in Vercel"),
     check("Cron secret", async () => {
       if (!process.env.CRON_SECRET) throw new Error("CRON_SECRET missing — automation cannot self-trigger");
       return "set";

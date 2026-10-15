@@ -590,6 +590,7 @@ function Settings({ t }: { t: Toast }) {
       <div className="card">
         <h3>Production</h3>
         <div className="row">
+          <div><label>Screen layout</label><select value={s.layout} onChange={(e) => set({ layout: e.target.value as BrandSettings["layout"] })}><option value="pip">Explainer: visuals full-screen, my face in a box bottom-right (recommended)</option><option value="face">My face full-screen (classic talking head)</option></select></div>
           <div><label>Avatar mode</label><select value={s.avatarMode} onChange={(e) => set({ avatarMode: e.target.value as "photo" | "clip" })}><option value="clip">Lip-sync onto my real performance clips (most natural — recommended)</option><option value="photo">Photo → talking video (AI body motion)</option></select></div>
           <div><label>YouTube privacy (live mode)</label><select value={s.youtubePrivacy} onChange={(e) => set({ youtubePrivacy: e.target.value as BrandSettings["youtubePrivacy"] })}><option>public</option><option>unlisted</option><option>private</option></select></div>
           <div><label>YouTube category id</label><input value={s.youtubeCategoryId} onChange={(e) => set({ youtubeCategoryId: e.target.value })} /></div>

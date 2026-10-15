@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { getAssets, getSettings, saveAssets, saveSettings } from "./db";
 import { getStorage } from "./storage";
-import { extractVoice, hasVideoStream, probeDuration, rmrf, runFfmpeg, tmpDir } from "./media/ffmpeg";
+import { extractVoice, hasVideoStream, liveliestWindow, probeDuration, rmrf, runFfmpeg, tmpDir } from "./media/ffmpeg";
 import { elevenCreateVoice } from "./ai/voice";
 import type { Assets } from "./types";
 
@@ -32,7 +32,9 @@ export async function setVoiceClip(url: string, by: string): Promise<{ assets: A
     if (secs < 8) throw new Error(`Voice clip is only ${secs.toFixed(1)}s — record at least 30-60s of clear speech`);
     if (secs < 30) notes.push(`Clip is ${secs.toFixed(0)}s. 60-120s of clean speech gives a much better clone.`);
     const short = path.join(dir, "ref.mp3");
-    await runFfmpeg(["-y", "-ss", secs > 14 ? "1" : "0", "-i", full, "-t", "10", "-c", "copy", short]);
+    // The clone copies the reference's energy: use the liveliest 12 s, not simply the first seconds.
+    const from = secs > 14 ? await liveliestWindow(full, 12) : 0;
+    await runFfmpeg(["-y", "-ss", from.toFixed(1), "-i", full, "-t", "12", "-af", "afade=t=in:d=0.05,areverse,afade=t=in:d=0.08,areverse", "-c:a", "libmp3lame", "-b:a", "192k", short]);
     const a: Assets = { ...(await getAssets()), clipUrl: url, updatedAt: new Date().toISOString(), updatedBy: by };
     a.voiceSampleUrl = await storage.put("assets/voice-sample.mp3", fs.readFileSync(full), "audio/mpeg");
     a.voiceRefShortUrl = await storage.put("assets/voice-ref.mp3", fs.readFileSync(short), "audio/mpeg");
