@@ -106,15 +106,20 @@ export class OpenAICompatLLM implements LLM {
     private keyEnv: string,
     private modelEnv: string,
     private prefer: (string | RegExp)[],
+    /** Keyless endpoint: always available (unless disabled), key optional, fixed default model. */
+    private keyless?: { model: string; disableEnv: string },
   ) {}
   available() {
+    if (this.keyless) return !process.env[this.keyless.disableEnv];
     return !!process.env[this.keyEnv];
   }
-  private headers() {
-    return { "Content-Type": "application/json", Authorization: `Bearer ${process.env[this.keyEnv]}` };
+  private headers(): Record<string, string> {
+    const key = process.env[this.keyEnv];
+    return { "Content-Type": "application/json", ...(key ? { Authorization: `Bearer ${key}` } : {}) };
   }
   async model(): Promise<string> {
     if (process.env[this.modelEnv]) return process.env[this.modelEnv]!;
+    if (this.keyless) return this.keyless.model;
     if (this.picked) return this.picked;
     const r = await httpJson<{ data: { id: string }[] }>(`${this.base}/models`, { headers: this.headers(), timeoutMs: 20_000, retries: 1 });
     const ids = r.data.map((m) => m.id);
@@ -150,6 +155,11 @@ export const LLM_REGISTRY: Record<string, LLM> = {
   cerebras: new OpenAICompatLLM("cerebras", "https://api.cerebras.ai/v1", "CEREBRAS_API_KEY", "CEREBRAS_MODEL", BIG),
   openrouter: new OpenAICompatLLM("openrouter", "https://openrouter.ai/api/v1", "OPENROUTER_API_KEY", "OPENROUTER_MODEL", [/:free$/]),
   nvidia: new OpenAICompatLLM("nvidia", "https://integrate.api.nvidia.com/v1", "NVIDIA_API_KEY", "NVIDIA_MODEL", BIG),
+  // ---- no key at all: last resort so a fresh deploy can write scripts before any key is added ----
+  pollinations: new OpenAICompatLLM("pollinations", "https://text.pollinations.ai/openai", "POLLINATIONS_TOKEN", "POLLINATIONS_MODEL", [], {
+    model: "openai",
+    disableEnv: "DISABLE_POLLINATIONS",
+  }),
   // ---- paid ----
   anthropic: new AnthropicLLM(),
   openai: new OpenAILLM(),
@@ -182,5 +192,5 @@ export async function generateJson<T>(
       }
     }
   }
-  throw new Error(`All LLM providers failed: ${errors.join(" || ") || "none configured (set ANTHROPIC_API_KEY, GEMINI_API_KEY or OPENAI_API_KEY)"}`);
+  throw new Error(`All LLM providers failed: ${errors.join(" || ") || "none configured (set GEMINI_API_KEY or GROQ_API_KEY)"}`);
 }

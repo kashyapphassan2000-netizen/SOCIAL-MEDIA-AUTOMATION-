@@ -52,7 +52,7 @@ export const DEFAULT_SETTINGS: BrandSettings = {
   // Free first; paid providers only kick in if their key is set (and the free path fails).
   avatarProviders: ["free-avatar", "fal-omnihuman", "fal-fabric", "still"],
   voiceProviders: ["free-voice", "elevenlabs", "fal-f5"],
-  llmProviders: ["gemini", "groq", "cerebras", "openrouter", "nvidia", "anthropic", "openai"],
+  llmProviders: ["gemini", "groq", "cerebras", "openrouter", "nvidia", "anthropic", "openai", "pollinations"],
   sheetId: "",
   brandPromise: "",
   signature: "",

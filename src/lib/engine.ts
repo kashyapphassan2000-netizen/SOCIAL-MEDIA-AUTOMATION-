@@ -37,7 +37,8 @@ export interface Deps {
 const pick = <T,>(reg: Record<string, T>, order: string[]) => order.map((n) => reg[n]).filter((x): x is T => !!x);
 
 export const defaultDeps: Deps = {
-  llms: (s) => pick(LLM_REGISTRY, s.llmProviders.length ? s.llmProviders : Object.keys(LLM_REGISTRY)),
+  // The keyless provider is always appended last, so saved settings from before it existed still get it.
+  llms: (s) => pick(LLM_REGISTRY, [...new Set([...(s.llmProviders.length ? s.llmProviders : Object.keys(LLM_REGISTRY)), "pollinations"])]),
   voices: (s) => {
     const list = pick(VOICE_REGISTRY, s.voiceProviders);
     if (s.allowGenericVoiceFallback && !list.includes(VOICE_REGISTRY["openai-tts"])) list.push(VOICE_REGISTRY["openai-tts"]);

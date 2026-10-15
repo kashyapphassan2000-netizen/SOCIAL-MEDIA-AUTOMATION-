@@ -59,8 +59,9 @@ export async function runHealth(): Promise<Check[]> {
       }
     }),
     check("Script AI (LLM)", async () => {
-      const on = s.llmProviders.filter((n) => LLM_REGISTRY[n]?.available());
-      if (!on.length) throw new Error("no LLM key set");
+      const on = [...new Set([...s.llmProviders, "pollinations"])].filter((n) => LLM_REGISTRY[n]?.available());
+      if (!on.length) throw new Error("no LLM available");
+      if (on.length === 1 && on[0] === "pollinations") return "only the keyless Pollinations fallback (works, weaker scripts) — add a free GEMINI_API_KEY or GROQ_API_KEY";
       return `available: ${on.join(" → ")}`;
     }, "Set a FREE key: GEMINI_API_KEY, GROQ_API_KEY, CEREBRAS_API_KEY, OPENROUTER_API_KEY or NVIDIA_API_KEY"),
     check("Voice clone", async () => {
