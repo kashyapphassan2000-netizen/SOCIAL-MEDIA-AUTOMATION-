@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { LLM_REGISTRY, generateJson, type LLM } from "./ai/llm";
+import { loadCustomLLMs } from "./ai/custom";
+import { WEBHOOK_MEDIA_HOLD_MIN } from "./outlets";
 import { PICK_SYSTEM, SCRIPT_SYSTEM, pickUser, scriptUser, validateScript } from "./ai/prompts";
 import { decodeEntities, enrichStory, fetchTrends, storyHash, type TrendFetcher } from "./ai/trends";
 import { VOICE_REGISTRY, type VoiceProvider } from "./ai/voice";
@@ -51,7 +53,12 @@ const pick = <T,>(reg: Record<string, T>, order: string[]) => order.map((n) => r
 
 export const defaultDeps: Deps = {
   // The keyless provider is always appended last, so saved settings from before it existed still get it.
-  llms: (s) => pick(LLM_REGISTRY, [...new Set([...(s.llmProviders.length ? s.llmProviders : Object.keys(LLM_REGISTRY)), "pollinations"])]),
+  // Plug-and-play providers (Settings → AI brain) not in the saved order still join, before the keyless fallback.
+  llms: (s) => {
+    const order = s.llmProviders.length ? s.llmProviders : Object.keys(LLM_REGISTRY).filter((k) => !k.startsWith("custom:"));
+    const customs = Object.keys(LLM_REGISTRY).filter((k) => k.startsWith("custom:"));
+    return pick(LLM_REGISTRY, [...new Set([...order, ...customs, "pollinations"])]);
+  },
   voices: (s) => {
     const list = pick(VOICE_REGISTRY, s.voiceProviders);
     if (s.allowGenericVoiceFallback && !list.includes(VOICE_REGISTRY["openai-tts"])) list.push(VOICE_REGISTRY["openai-tts"]);
@@ -457,7 +464,7 @@ async function publish(job: Job, s: BrandSettings): Promise<StageResult> {
           }
         }
       } catch (e) {
-        const err = e as Error & { resetPending?: boolean };
+        const err = e as Error & { resetPending?: boolean; pendingOverride?: Record<string, string> };
         const attempts = prev.attempts + 1;
         const permanent = e instanceof ReauthRequired || isPermanent(e);
         const failed = permanent || attempts >= MAX_PUBLISH_ATTEMPTS;
@@ -466,7 +473,7 @@ async function publish(job: Job, s: BrandSettings): Promise<StageResult> {
           attempts,
           state: failed ? "failed" : "pending",
           error: err.message.slice(0, 500),
-          pending: err.resetPending ? undefined : prev.pending,
+          pending: err.pendingOverride ?? (err.resetPending ? undefined : prev.pending),
           nextAttemptAt: failed ? undefined : after(Math.min(1800, 60 * 2 ** (attempts - 1))),
         };
         log(job, failed ? "error" : "warn", `${p} ${failed ? "FAILED" : `attempt ${attempts} failed`}: ${err.message}`);
@@ -504,6 +511,12 @@ async function cleanup(job: Job, s: BrandSettings): Promise<StageResult> {
   if (!job.exported) {
     await exportForHandoff(job);
     job.exported = true;
+  }
+  // Webhook receivers (Zapier, Make, n8n...) download the video after we call them — keep it available a while.
+  const hookAt = job.data.publish?.webhook?.state === "done" ? job.data.publish.webhook.pending?.deliveredAt : undefined;
+  if (hookAt && job.blobs.length) {
+    const left = new Date(hookAt).getTime() + WEBHOOK_MEDIA_HOLD_MIN * 60_000 - Date.now();
+    if (left > 0) return { wait: Math.min(1800, Math.ceil(left / 1000)) };
   }
   if (job.blobs.length) {
     try {
@@ -646,6 +659,7 @@ export async function tick(opts: { budgetSec?: number; enqueue?: boolean } = {})
   const t0 = Date.now();
   const kv = getKV();
   const lockId = `${t0}-${Math.random()}`;
+  await loadCustomLLMs();
   if (!(await kv.setNx("lock:tick", lockId, Math.ceil(budgetMs / 1000) + 30))) {
     return { status: "busy", created: 0, steps: 0, activeJobs: 0, nextWakeSec: null, flushed: 0 };
   }

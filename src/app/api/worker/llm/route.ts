@@ -3,6 +3,7 @@ import { requireWorker } from "@/lib/workerAuth";
 import { generateJson } from "@/lib/ai/llm";
 import { defaultDeps } from "@/lib/engine";
 import { getSettings } from "@/lib/db";
+import { loadCustomLLMs } from "@/lib/ai/custom";
 
 export const maxDuration = 180;
 
@@ -11,6 +12,7 @@ export const POST = handle(async (req: Request) => {
   await requireWorker(req);
   const { prompt } = await body<{ prompt: string }>(req);
   const s = await getSettings();
+  await loadCustomLLMs();
   const r = await generateJson(defaultDeps.llms(s), "You are a precise senior ML engineer. Reply with one JSON object only.", String(prompt).slice(0, 60000), (v) => v);
   return json({ text: JSON.stringify(r.data), provider: r.provider });
 });

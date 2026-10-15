@@ -1,6 +1,7 @@
 import { googleAccessToken, linkedinAccessToken, loadConnection, metaToken, pinterestToken, ReauthRequired, xAccessToken } from "./connections";
 import { form, http, httpJson, HttpFailure } from "./http";
 import type { BrandSettings, Platform, PublishResult, Script, Story } from "./types";
+import { webhookPublisher } from "./outlets";
 
 export interface PublishInput {
   videoUrl: string;
@@ -439,10 +440,11 @@ export async function postFirstComment(p: Platform, postId: string, text: string
   return false;
 }
 
-export const PUBLISHERS: Record<Platform, Publisher> = { youtube, instagram, facebook, threads, x, linkedin, pinterest, bluesky, telegram };
+export const PUBLISHERS: Record<Platform, Publisher> = { youtube, instagram, facebook, threads, x, linkedin, pinterest, bluesky, telegram, webhook: webhookPublisher };
 
 /** Errors that will never succeed on retry (bad permissions / policy) — fail fast instead of burning attempts. */
 export function isPermanent(e: unknown): boolean {
+  if ((e as { permanent?: boolean })?.permanent) return true;
   if (e instanceof HttpFailure) {
     if ([400, 401, 403, 404, 422].includes(e.status)) {
       // Rate-limit style 403s from Google / Meta are transient.

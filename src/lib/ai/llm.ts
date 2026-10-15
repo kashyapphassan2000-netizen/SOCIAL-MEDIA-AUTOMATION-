@@ -8,15 +8,18 @@ export interface LLM {
   complete(system: string, user: string): Promise<string>;
 }
 
-class AnthropicLLM implements LLM {
-  name = "anthropic";
+export class AnthropicLLM implements LLM {
+  constructor(
+    public name = "anthropic",
+    private literal?: { key: string; model?: string },
+  ) {}
   available() {
-    return !!process.env.ANTHROPIC_API_KEY;
+    return !!(this.literal?.key || process.env.ANTHROPIC_API_KEY);
   }
   async complete(system: string, user: string) {
-    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, timeout: 120_000, maxRetries: 2 });
+    const client = new Anthropic({ apiKey: this.literal?.key || process.env.ANTHROPIC_API_KEY, timeout: 120_000, maxRetries: 2 });
     const msg = await client.beta.messages.create({
-      model: process.env.ANTHROPIC_MODEL || "claude-opus-5-5",
+      model: this.literal?.model || process.env.ANTHROPIC_MODEL || "claude-opus-5-5",
       max_tokens: 8000,
       system,
       messages: [{ role: "user", content: user }],
@@ -108,17 +111,21 @@ export class OpenAICompatLLM implements LLM {
     private prefer: (string | RegExp)[],
     /** Keyless endpoint: always available (unless disabled), key optional, fixed default model. */
     private keyless?: { model: string; disableEnv: string },
+    /** Plug-and-play provider added in Settings: key (optional for local servers) and model given directly. */
+    private literal?: { key?: string; model?: string },
   ) {}
   available() {
+    if (this.literal) return true;
     if (this.keyless) return !process.env[this.keyless.disableEnv];
     return !!process.env[this.keyEnv];
   }
   private headers(): Record<string, string> {
-    const key = process.env[this.keyEnv];
+    const key = this.literal ? this.literal.key : process.env[this.keyEnv];
     return { "Content-Type": "application/json", ...(key ? { Authorization: `Bearer ${key}` } : {}) };
   }
   async model(): Promise<string> {
-    if (process.env[this.modelEnv]) return process.env[this.modelEnv]!;
+    if (this.literal?.model) return this.literal.model;
+    if (this.modelEnv && process.env[this.modelEnv]) return process.env[this.modelEnv]!;
     if (this.keyless) return this.keyless.model;
     if (this.picked) return this.picked;
     const r = await httpJson<{ data: { id: string }[] }>(`${this.base}/models`, { headers: this.headers(), timeoutMs: 20_000, retries: 1 });
@@ -163,7 +170,7 @@ export class OpenAICompatLLM implements LLM {
   }
 }
 
-const BIG = [/gpt-oss-120b/, /deepseek-v[34]/i, /kimi-k[23]/i, /llama-4-maverick/i, /qwen3-235b/i, /llama-3\.3-70b/i, /gpt-oss-20b/, /70b/i];
+export const BIG = [/gpt-oss-120b/, /deepseek-v[34]/i, /kimi-k[23]/i, /llama-4-maverick/i, /qwen3-235b/i, /llama-3\.3-70b/i, /gpt-oss-20b/, /70b/i];
 
 export const LLM_REGISTRY: Record<string, LLM> = {
   // ---- free tiers (no card needed) ----

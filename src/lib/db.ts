@@ -44,7 +44,7 @@ export const DEFAULT_SETTINGS: BrandSettings = {
   allowGenericVoiceFallback: false,
   allowStillImageFallback: true,
   maxVideosPerDay: 6,
-  dailyPlatformCaps: { youtube: 10, instagram: 20, facebook: 20, x: 20, threads: 20, linkedin: 3, pinterest: 10, bluesky: 20, telegram: 20 },
+  dailyPlatformCaps: { youtube: 10, instagram: 20, facebook: 20, x: 20, threads: 20, linkedin: 3, pinterest: 10, bluesky: 20, telegram: 20, webhook: 30 },
   youtubeCategoryId: "28",
   youtubePrivacy: "public",
   musicUrl: "",

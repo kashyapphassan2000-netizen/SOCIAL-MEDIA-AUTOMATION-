@@ -413,8 +413,107 @@ function Connections({ owner, t }: { owner: boolean; t: Toast }) {
           </div>
         );
       })}
-      <div className="card muted small">Not automatable: TikTok (banned in India, excluded), Snapchat Spotlight (API is allow-list only for approved partners), Moj / Josh / ShareChat / Reddit video (no open posting API). Their monetization is covered in the README.</div>
+      {owner && <Outlets t={t} />}
+      <div className="card muted small">No direct API: TikTok (banned in India, excluded), Snapchat Spotlight (allow-list partners only), Moj / Josh / ShareChat. Reach them through "Any network" above with Zapier / Make / n8n / Buffer where those tools support them.</div>
     </>
+  );
+}
+
+// ---------------------------------------------------------------- Any network (webhook outlets)
+type OutletView = { id: string; name: string; url: string; captionStyle?: string; enabled: boolean; last?: { ok: boolean; at: string; status?: number; error?: string } };
+function Outlets({ t }: { t: Toast }) {
+  const [list, setList] = useState<OutletView[]>([]);
+  const [name, setName] = useState("");
+  const [url, setUrl] = useState("");
+  const [style, setStyle] = useState("");
+  const [secret, setSecret] = useState<string | null>(null);
+  const load = useCallback(() => api("/api/outlets").then((r) => setList(r.outlets)).catch(t.err), [t.err]);
+  useEffect(() => { load(); }, [load]);
+  const add = async () => {
+    try {
+      const r = await api("/api/outlets", { method: "POST", body: JSON.stringify({ name, url, captionStyle: style || undefined }) });
+      setSecret(r.secret); setName(""); setUrl(""); setStyle(""); load();
+      t.ok(`Added ${r.outlet.name}. Tick "Any network" in your schedules to send shorts there.`);
+    } catch (e) { t.err(e); }
+  };
+  return (
+    <div className="card">
+      <b>Any network — webhooks</b>
+      <p className="muted small">Add a webhook URL from Zapier, Make, n8n, Pipedream, IFTTT or Buffer. Every finished short is sent there with a public video link, title, caption and hashtags, so you can post to any network those tools reach. Each request is signed with a secret (header X-Shorts-Signature, HMAC-SHA256 of the body).</p>
+      <div className="row">
+        <div><label>Name</label><input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Zapier → Snapchat" /></div>
+        <div style={{ flex: 2 }}><label>Webhook URL</label><input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://hooks.zapier.com/…" /></div>
+        <div><label>Caption style</label>
+          <select value={style} onChange={(e) => setStyle(e.target.value)}>
+            <option value="">generic</option>
+            {PLATFORMS.filter((p) => p !== "webhook").map((p) => <option key={p} value={p}>{PLATFORM_LABEL[p]}</option>)}
+          </select>
+        </div>
+      </div>
+      <button className="primary" disabled={!url} onClick={add}>Add outlet</button>
+      {secret && <p className="small">Signing secret (shown once — paste it into your automation if you verify signatures): <code>{secret}</code></p>}
+      {list.map((o) => (
+        <div className="row small" key={o.id} style={{ marginTop: 8, justifyContent: "space-between" }}>
+          <span><span className={o.last ? (o.last.ok ? "ok-dot" : "bad-dot") : "bad-dot"} /><b>{o.name}</b> <span className="muted">{new URL(o.url).host}{o.last ? ` · last ${o.last.ok ? "OK" : `failed: ${o.last.error ?? o.last.status}`} ${ago(o.last.at)}` : " · never used"}</span></span>
+          <span className="row">
+            <button onClick={async () => { try { const r = await api("/api/outlets", { method: "POST", body: JSON.stringify({ testId: o.id }) }); r.ok ? t.ok(`Test delivered (${r.status})`) : t.err(r.error); load(); } catch (e) { t.err(e); } }}>Send test</button>
+            <button className="danger" onClick={async () => { if (!confirm("Remove outlet?")) return; await api(`/api/outlets?id=${o.id}`, { method: "DELETE" }).catch(t.err); load(); }}>Remove</button>
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- AI brain (plug & play)
+type CustomView = { id: string; name: string; label: string; model: string; baseUrl: string; keyHint: string; lastTest?: { ok: boolean; ms?: number } };
+function AiBrain({ t, onChange }: { t: Toast; onChange: () => void }) {
+  const [list, setList] = useState<CustomView[]>([]);
+  const [order, setOrder] = useState<string[]>([]);
+  const [key, setKey] = useState("");
+  const [baseUrl, setBaseUrl] = useState("");
+  const [model, setModel] = useState("");
+  const [busy, setBusy] = useState(false);
+  const refresh = useCallback(() => api("/api/llm").then((r) => { setList(r.custom); setOrder(r.order); }).catch(t.err), [t.err]);
+  useEffect(() => { refresh(); }, [refresh]);
+  const connect = async () => {
+    setBusy(true);
+    try {
+      const r = await api("/api/llm", { method: "POST", body: JSON.stringify({ key, baseUrl: baseUrl || undefined, model: model || undefined }) });
+      t.ok(`Connected ${r.provider.label} (${r.provider.model}) — it now writes every script`);
+      setKey(""); setBaseUrl(""); setModel("");
+      await refresh(); onChange();
+    } catch (e) { t.err(e as Error); } finally { setBusy(false); }
+  };
+  const remove = async (id: string) => {
+    try { await api(`/api/llm?id=${encodeURIComponent(id)}`, { method: "DELETE" }); await refresh(); onChange(); } catch (e) { t.err(e as Error); }
+  };
+  return (
+    <div className="card">
+      <h3>AI brain — plug &amp; play</h3>
+      <p className="muted small">Paste a key from ANY AI service: Gemini, Groq, OpenAI, Claude, DeepSeek, Mistral, xAI, OpenRouter, NVIDIA, Together, Hugging Face… For a model on your own PC (Ollama, LM Studio) paste its URL, e.g. http://localhost:11434/v1. It is detected, tested with a real request and becomes the first choice automatically. Nothing else changes; if it ever fails, the next one in line takes over.</p>
+      <div className="row">
+        <div style={{ flex: 2 }}><label>API key</label><input type="password" autoComplete="off" value={key} onChange={(e) => setKey(e.target.value)} placeholder="sk-… / gsk_… / AIza… / sk-ant-…" /></div>
+        <div><label>Base URL (only if unusual)</label><input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="auto-detected" /></div>
+        <div><label>Model (optional)</label><input value={model} onChange={(e) => setModel(e.target.value)} placeholder="best one picked" /></div>
+      </div>
+      <button className="primary" disabled={busy || (!key && !baseUrl)} onClick={connect}>{busy ? "Testing…" : "Connect & use"}</button>
+      {list.length > 0 && (
+        <table className="small" style={{ marginTop: 12 }}>
+          <tbody>
+            {list.map((c) => (
+              <tr key={c.id}>
+                <td>{order.indexOf(c.name) >= 0 ? `#${order.indexOf(c.name) + 1}` : "backup"}</td>
+                <td><b>{c.label}</b> · {c.model}</td>
+                <td className="muted">{c.keyHint}</td>
+                <td>{c.lastTest?.ok ? `✓ ${c.lastTest.ms ?? "?"} ms` : ""}</td>
+                <td><button className="danger" onClick={() => remove(c.id)}>Remove</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
   );
 }
 
@@ -422,7 +521,8 @@ function Connections({ owner, t }: { owner: boolean; t: Toast }) {
 function Settings({ t }: { t: Toast }) {
   const [s, setS] = useState<BrandSettings | null>(null);
   const [opts, setOpts] = useState<{ avatar: string[]; voice: string[]; llm: string[] } | null>(null);
-  useEffect(() => { api("/api/settings").then((r) => { setS(r.settings); setOpts(r.options); }).catch(t.err); }, [t.err]);
+  const load = useCallback(() => api("/api/settings").then((r) => { setS(r.settings); setOpts(r.options); }).catch(t.err), [t.err]);
+  useEffect(() => { load(); }, [load]);
   if (!s || !opts) return <p className="muted">Loading…</p>;
   const set = (p: Partial<BrandSettings>) => setS({ ...s, ...p });
   const order = (k: "avatarProviders" | "voiceProviders" | "llmProviders", all: string[]) => (
@@ -436,6 +536,7 @@ function Settings({ t }: { t: Toast }) {
   return (
     <>
       <h2 style={{ marginTop: 8 }}>Brand & Settings</h2>
+      <AiBrain t={t} onChange={load} />
       <div className="card">
         <h3>Brand</h3>
         <div className="row">

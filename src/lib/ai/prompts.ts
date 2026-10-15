@@ -64,6 +64,7 @@ const CAPTION_RULES: Record<Platform, string> = {
   pinterest: "Pinterest description: keyword-rich, searchable (Pinterest is a search engine), 2-3 sentences, 3-5 hashtags (max 450 chars)",
   bluesky: "Bluesky post: max 280 characters total, conversational, 1-2 hashtags",
   telegram: "Telegram channel post: bold-free plain text, 2-4 short lines with the key takeaway and source credit (max 900 chars)",
+  webhook: "Generic caption that works on any network: 1-2 punchy lines + 3-5 hashtags (max 500 chars)",
 };
 
 export function scriptUser(s: Schedule, story: Story, brand: BrandSettings, ctx: { hookStyle: string; episode?: number; learnings?: Learnings | null }): string {
@@ -135,6 +136,7 @@ export function validateScript(v: unknown, targetSeconds: number): Script {
   captions.bluesky = captions.bluesky.slice(0, 295);
   captions.pinterest = captions.pinterest.slice(0, 495);
   captions.telegram = captions.telegram.slice(0, 1000);
+  captions.webhook = captions.webhook.slice(0, 500);
   const hashtags = Array.isArray(o.hashtags) ? o.hashtags.map((h: unknown) => String(h).replace(/^#/, "").replace(/\s+/g, "")).filter(Boolean).slice(0, 10) : [];
   return {
     hook: str(o.hook, "hook", 200),

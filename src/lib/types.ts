@@ -1,4 +1,4 @@
-export const PLATFORMS = ["youtube", "instagram", "facebook", "x", "threads", "linkedin", "pinterest", "bluesky", "telegram"] as const;
+export const PLATFORMS = ["youtube", "instagram", "facebook", "x", "threads", "linkedin", "pinterest", "bluesky", "telegram", "webhook"] as const;
 export type Platform = (typeof PLATFORMS)[number];
 
 export const PLATFORM_LABEL: Record<Platform, string> = {
@@ -11,6 +11,7 @@ export const PLATFORM_LABEL: Record<Platform, string> = {
   pinterest: "Pinterest (video Pins)",
   bluesky: "Bluesky",
   telegram: "Telegram channel",
+  webhook: "Any network (webhooks → Zapier / Make / n8n / Buffer)",
 };
 
 export type Role = "owner" | "user";

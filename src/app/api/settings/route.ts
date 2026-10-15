@@ -6,9 +6,11 @@ import { logActivity } from "@/lib/sheets";
 import { AVATAR_REGISTRY } from "@/lib/ai/avatar";
 import { VOICE_REGISTRY } from "@/lib/ai/voice";
 import { LLM_REGISTRY } from "@/lib/ai/llm";
+import { loadCustomLLMs } from "@/lib/ai/custom";
 
 export const GET = handle(async () => {
   await requireSession();
+  await loadCustomLLMs();
   return json({
     settings: await getSettings(),
     options: { avatar: Object.keys(AVATAR_REGISTRY), voice: Object.keys(VOICE_REGISTRY), llm: Object.keys(LLM_REGISTRY) },

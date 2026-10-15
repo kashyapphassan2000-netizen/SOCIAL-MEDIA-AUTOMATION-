@@ -10,6 +10,7 @@ import { queueStats } from "./freeworker";
 import { httpJson } from "./http";
 import { flushSheet } from "./sheets";
 import { LLM_REGISTRY } from "./ai/llm";
+import { loadCustomLLMs } from "./ai/custom";
 
 export interface Check {
   name: string;
@@ -59,11 +60,12 @@ export async function runHealth(): Promise<Check[]> {
       }
     }),
     check("Script AI (LLM)", async () => {
-      const on = [...new Set([...s.llmProviders, "pollinations"])].filter((n) => LLM_REGISTRY[n]?.available());
+      const customs = await loadCustomLLMs();
+      const on = [...new Set([...s.llmProviders, ...customs, "pollinations"])].filter((n) => LLM_REGISTRY[n]?.available());
       if (!on.length) throw new Error("no LLM available");
       if (on.length === 1 && on[0] === "pollinations") return "only the keyless Pollinations fallback (works, weaker scripts) — add a free GEMINI_API_KEY or GROQ_API_KEY";
       return `available: ${on.join(" → ")}`;
-    }, "Set a FREE key: GEMINI_API_KEY, GROQ_API_KEY, CEREBRAS_API_KEY, OPENROUTER_API_KEY or NVIDIA_API_KEY"),
+    }, "Paste any AI key in Brand & Settings → AI brain (Gemini, Groq, OpenAI, Claude, DeepSeek, ... or a local Ollama URL)"),
     check("Voice clone", async () => {
       if (!a.voiceSampleUrl) throw new Error("no voice clip uploaded");
       const parts: string[] = [];
