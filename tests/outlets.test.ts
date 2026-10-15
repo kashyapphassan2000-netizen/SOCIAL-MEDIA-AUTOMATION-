@@ -48,8 +48,8 @@ describe("any-network webhook outlets", () => {
     await addOutlet({ name: "B", url: `${base}/b` });
     const before = got.length;
     failNext = true; // first delivery (A) fails
-    let err: (Error & { pendingOverride?: Record<string, string> }) | null = null;
-    try { await webhookPublisher.step(inp(), { state: "pending", attempts: 0 }); } catch (e) { err = e as never; }
+    type E = Error & { pendingOverride?: Record<string, string> };
+    const err = await webhookPublisher.step(inp(), { state: "pending", attempts: 0 }).then(() => null, (e: E) => e);
     expect(err?.message).toContain("A:");
     expect(got.length).toBe(before + 1); // B delivered
     const r = await webhookPublisher.step(inp(), { state: "pending", attempts: 1, pending: err!.pendingOverride });
