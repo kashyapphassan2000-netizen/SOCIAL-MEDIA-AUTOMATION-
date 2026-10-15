@@ -49,6 +49,10 @@ def main():
         still_mode=True,  # natural, restrained head motion — required for "full"
         use_enhancer=False,
         batch_size=batch,
+        # Livelier delivery: a little more expression, and a pose style that varies per video (0-45 are
+        # SadTalker's learned head-motion styles) so consecutive shorts don't move identically.
+        exp_scale=float(os.environ.get("SADTALKER_EXP_SCALE", "1.15")),
+        pose_style=int(os.environ.get("SADTALKER_POSE_STYLE", str(abs(hash(audio)) % 46))),
         size=size,
         result_dir=os.path.join(work, "results"),
     )

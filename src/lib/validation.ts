@@ -46,6 +46,8 @@ export const settingsInput = z.object({
   youtubePrivacy: z.enum(["public", "unlisted", "private"]),
   musicUrl: z.string().max(500),
   musicVolume: z.number().min(0).max(1),
+  musicMode: z.enum(["auto", "generated", "library", "off"]).default("auto"),
+  denoise: z.boolean().default(true),
   avatarProviders: z.array(z.string()).min(1),
   voiceProviders: z.array(z.string()).min(1),
   llmProviders: z.array(z.string()).min(1),

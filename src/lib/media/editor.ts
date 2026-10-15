@@ -12,6 +12,8 @@ export interface EditInput {
   audioPath: string;
   musicPath?: string;
   musicVolume: number;
+  /** Clean the voice (noise reduction + compression). Default on. */
+  denoise?: boolean;
   words: WordTiming[];
   hook: string;
   handle: string;
@@ -121,10 +123,14 @@ export async function renderShort(inp: EditInput, profile: Profile, timeoutMs = 
 
   const norm = profile.loudnorm ? ",loudnorm=I=-14:TP=-1.5:LRA=11" : "";
   const mix: string[] = [];
-  f.push(`[${iAud}:a]aresample=44100,aformat=channel_layouts=stereo[voice]`);
+  // Voice: rumble cut, adaptive noise reduction (room hiss / hum / TTS artefacts), gentle broadcast compression.
+  const clean = inp.denoise === false ? "" : "highpass=f=80,afftdn=nf=-25:tn=1,acompressor=threshold=-20dB:ratio=3:attack=5:release=80:makeup=2,";
+  f.push(`[${iAud}:a]aresample=44100,${clean}aformat=channel_layouts=stereo${iMus >= 0 ? ",asplit=2[voice][vkey]" : "[voice]"}`);
   mix.push("[voice]");
   if (iMus >= 0) {
-    f.push(`[${iMus}:a]aresample=44100,aformat=channel_layouts=stereo,volume=${inp.musicVolume}[mus]`);
+    // Music sits under the voice and ducks further while you speak (side-chain), swelling back in the gaps.
+    f.push(`[${iMus}:a]aresample=44100,aformat=channel_layouts=stereo,volume=${inp.musicVolume}[mraw]`);
+    f.push(`[mraw][vkey]sidechaincompress=threshold=0.03:ratio=6:attack=15:release=350[mus]`);
     mix.push("[mus]");
   }
   if (iSfx >= 0) {

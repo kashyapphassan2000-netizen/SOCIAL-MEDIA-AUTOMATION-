@@ -2,7 +2,7 @@ import { HttpError, requireSession } from "@/lib/auth";
 import { handle, json } from "@/lib/api";
 import { getAssets } from "@/lib/db";
 import { getStorage } from "@/lib/storage";
-import { addPerformanceClip, removeClip, setPhoto, setVoiceClip } from "@/lib/studio";
+import { addMusicTrack, addPerformanceClip, removeClip, removeMusicTrack, setPhoto, setVoiceClip } from "@/lib/studio";
 import { logActivity } from "@/lib/sheets";
 
 export const maxDuration = 120;
@@ -45,12 +45,20 @@ export const POST = handle(async (req: Request) => {
     await logActivity(s, "studio.performance_clip", r.notes.join(" "));
     return json(r);
   }
-  throw new HttpError(400, "kind must be photo, clip or performance");
+  if (kind === "music") {
+    const r = await addMusicTrack(url, name, s.email);
+    await logActivity(s, "studio.music", name);
+    return json(r);
+  }
+  throw new HttpError(400, "kind must be photo, clip, performance or music");
 });
 
 export const DELETE = handle(async (req: Request) => {
   const s = await requireSession();
-  const url = new URL(req.url).searchParams.get("clip");
+  const q = new URL(req.url).searchParams;
+  const track = q.get("music");
+  if (track) return json({ assets: await removeMusicTrack(track, s.email) });
+  const url = q.get("clip");
   if (!url) throw new HttpError(400, "clip url required");
   const assets = await removeClip(url);
   await logActivity(s, "studio.remove_clip", url);

@@ -218,6 +218,10 @@ export interface BrandSettings {
   youtubePrivacy: "public" | "unlisted" | "private";
   musicUrl: string;
   musicVolume: number;
+  /** auto = your library tracks if uploaded, else original generated music; generated; library; off. */
+  musicMode: "auto" | "generated" | "library" | "off";
+  /** Noise reduction + compression on the voice. */
+  denoise: boolean;
   avatarProviders: string[];
   voiceProviders: string[];
   llmProviders: string[];
@@ -243,6 +247,8 @@ export interface Assets {
   /** Real "performance" clips of you talking with natural gestures (different outfits/locations = brand looks). */
   clips?: { url: string; name: string; addedAt: string }[];
   voiceSampleUrl?: string;
+  /** Your own licensed music tracks (e.g. YouTube Audio Library downloads) rotated under videos. */
+  music?: { url: string; name: string; addedAt: string }[];
   /** ≤12s excerpt used as a zero-shot voice reference (F5-TTS). */
   voiceRefShortUrl?: string;
   voiceSampleText?: string;

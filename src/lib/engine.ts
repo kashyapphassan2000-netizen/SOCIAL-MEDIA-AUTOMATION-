@@ -13,6 +13,7 @@ import { ReauthRequired } from "./connections";
 import { estimateWordTimings } from "./media/captions";
 import { PROFILES, planPunchIns, renderShort } from "./media/editor";
 import { findBroll, planCutaways, type BrollFinder } from "./media/broll";
+import { moodFor, seedFrom, snapToBeat, synthMusic, tempoOf } from "./media/music";
 import { imageExt, probeDuration, rmrf, runFfmpeg, tmpDir } from "./media/ffmpeg";
 import { getStorage, type Storage } from "./storage";
 import { chooseHookStyle, collectStats, learnings, recordPublished } from "./insights";
@@ -361,33 +362,27 @@ async function edit(job: Job, s: BrandSettings): Promise<StageResult> {
     const audioExt = job.data.audioUrl!.split("?")[0].split(".").pop() || "mp3";
     const audio = path.join(dir, `voice.${audioExt}`);
     fs.writeFileSync(audio, await storage.read(job.data.audioUrl!));
-    let music: string | undefined;
-    if (s.musicUrl) {
-      try {
-        music = path.join(dir, "music.mp3");
-        fs.writeFileSync(music, await storage.read(s.musicUrl));
-      } catch (e) {
-        music = undefined;
-        log(job, "warn", `Background music unavailable: ${(e as Error).message}`);
-      }
-    }
+    const music = await pickMusic(job, s, dir);
+    // Cuts and zooms land on the beat when we know the tempo (our own generated track).
+    const onBeat = (t: number) => (music?.bpm ? snapToBeat(t, music.bpm) : t);
     const sc = job.data.script!;
     const broll: { path: string; kind: "video" | "image"; start: number; end: number }[] = [];
     for (const [i, b] of (job.data.broll ?? []).entries()) {
       try {
         const p = path.join(dir, `broll-${i}.${b.kind === "video" ? "mp4" : "jpg"}`);
         fs.writeFileSync(p, await storage.read(b.url));
-        broll.push({ path: p, kind: b.kind, start: b.start, end: b.end });
+        const start = onBeat(b.start);
+        broll.push({ path: p, kind: b.kind, start, end: start + (b.end - b.start) });
       } catch {
         /* skip a missing cutaway */
       }
     }
     const words = job.data.words ?? [];
     const input = {
-      workDir: dir, visualPath: visual, isStill: still, audioPath: audio, musicPath: music, musicVolume: s.musicVolume,
+      workDir: dir, visualPath: visual, isStill: still, audioPath: audio, musicPath: music?.path, musicVolume: s.musicVolume, denoise: s.denoise,
       words, hook: sc.onScreenHook, handle: s.handle, cta: sc.cta || s.ctaText,
       primary: s.primaryColor, accent: s.accentColor, text: s.textColor, thumbnailText: sc.thumbnailText,
-      broll, punchIns: s.punchIns && !still ? planPunchIns(words, job.data.audioSeconds ?? 0) : [], sfx: s.sfx,
+      broll, punchIns: s.punchIns && !still ? planPunchIns(words, job.data.audioSeconds ?? 0).map(([a, b]) => [onBeat(a), b] as [number, number]).filter(([a, b]) => b - a > 0.6) : [], sfx: s.sfx,
       emphasis: (sc.beats ?? []).map((b) => b.emphasis).filter(Boolean),
     };
     let out: { videoPath: string; thumbPath: string; mode: string } | null = null;
@@ -505,6 +500,60 @@ async function exportForHandoff(job: Job) {
     JSON.stringify({ jobId: job.id, topic: job.topic, story: job.data.story, title: sc.title, description: sc.description, hashtags: sc.hashtags, captions: sc.captions, pinnedComment: sc.pinnedComment, platforms: job.platforms, publishMode: job.publishMode }, null, 2),
   );
   log(job, "info", `Exported for publishing: ${out}`);
+}
+
+/**
+ * Background music that can never cost you monetization:
+ *  1. a fixed track URL you set (your responsibility), else
+ *  2. your uploaded library (licensed tracks, rotated), else
+ *  3. an ORIGINAL track generated for this video (claim-free by construction).
+ */
+/** The re-hook line ("But here's the part nobody's talking about") — where editors cut the music for impact. */
+export function findReHook(words: { word: string; start: number; end: number }[], duration: number): { at: number; dur: number } | undefined {
+  if (words.length < 8 || duration < 12) return undefined;
+  const norm = words.map((w) => w.word.toLowerCase().replace(/[^a-z']/g, ""));
+  for (let i = 0; i < norm.length - 2; i++) {
+    const tri = `${norm[i]} ${norm[i + 1]} ${norm[i + 2]}`;
+    if (/^(but here'?s|here'?s the|but wait|plot twist|here'?s what|but the real|the crazy part|nobody'?s talking|nobody is talking)/.test(tri) && words[i].start > duration * 0.25 && words[i].start < duration * 0.8) {
+      let j = i;
+      while (j < words.length - 1 && !/[.!?,]$/.test(words[j].word) && words[j].end - words[i].start < 3) j++;
+      return { at: Math.max(0, words[i].start - 0.08), dur: Math.min(3, words[j].end - words[i].start + 0.15) };
+    }
+  }
+  return undefined;
+}
+
+async function pickMusic(job: Job, s: BrandSettings, dir: string): Promise<{ path: string; bpm?: number } | undefined> {
+  const mode = s.musicMode ?? "auto";
+  if (mode === "off") return undefined;
+  const storage = deps.storage();
+  try {
+    if (s.musicUrl) {
+      const p = path.join(dir, "music.mp3");
+      fs.writeFileSync(p, await storage.read(s.musicUrl));
+      log(job, "info", "Music: your fixed track");
+      return { path: p };
+    }
+    const lib = (await getAssets()).music ?? [];
+    if (lib.length && mode !== "generated") {
+      const t = lib[seedFrom(job.id) % lib.length];
+      const p = path.join(dir, `music.${t.url.split("?")[0].split(".").pop() || "mp3"}`);
+      fs.writeFileSync(p, await storage.read(t.url));
+      log(job, "info", `Music: "${t.name}" from your library`);
+      return { path: p };
+    }
+    if (mode === "library") return undefined;
+    const p = path.join(dir, "music.wav");
+    const mood = moodFor(job.data.script?.hookStyle);
+    const drop = findReHook(job.data.words ?? [], job.data.audioSeconds ?? 0);
+    fs.writeFileSync(p, synthMusic((job.data.audioSeconds ?? 35) + 1, seedFrom(job.id), mood, { drop }));
+    const bpm = tempoOf(seedFrom(job.id), mood);
+    log(job, "info", `Music: original ${mood} track at ${bpm} BPM${drop ? `, drops out for the re-hook at ${drop.at.toFixed(1)} s` : ""} (no copyright claims possible)`);
+    return { path: p, bpm };
+  } catch (e) {
+    log(job, "warn", `Background music skipped: ${(e as Error).message}`);
+    return undefined;
+  }
 }
 
 async function cleanup(job: Job, s: BrandSettings): Promise<StageResult> {

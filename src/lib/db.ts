@@ -48,7 +48,9 @@ export const DEFAULT_SETTINGS: BrandSettings = {
   youtubeCategoryId: "28",
   youtubePrivacy: "public",
   musicUrl: "",
-  musicVolume: 0.08,
+  musicVolume: 0.14,
+  musicMode: "auto",
+  denoise: true,
   // Free first; paid providers only kick in if their key is set (and the free path fails).
   avatarProviders: ["free-avatar", "fal-omnihuman", "fal-fabric", "still"],
   voiceProviders: ["free-voice", "elevenlabs", "fal-f5"],

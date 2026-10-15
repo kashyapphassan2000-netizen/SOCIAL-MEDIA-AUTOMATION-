@@ -31,6 +31,8 @@ Retention structure (non-negotiable):
 4. PAYOFF: the creator's own opinion / prediction — original commentary is what keeps the channel monetisable under "inauthentic / reused content" rules.
 5. LOOP ENDING: the last sentence should flow naturally back into the first line when the short replays, OR end with a pointed question that begs a comment. Then the sign-off.
 
+Entertainment (people should watch the creator for the creator, not just the news): talk like you are excitedly telling a smart friend something over chai — personality, a light joke or playful exaggeration where it fits, ONE vivid everyday analogy (especially Indian context: cricket, chai, traffic, exams, jugaad), a rhetorical question to the viewer, and a confident opinion. Vary sentence length: short punch, longer explanation, short punch.
+Re-hook wording: use one of these phrases at the start of the re-hook sentence so the edit can drop the music there: "But here's the part nobody's talking about", "But here's the crazy part", "But wait".
 Voice: spoken, punchy, contractions, one idea per sentence, sounds like a smart friend not a news anchor. Plain words only in "spoken": no emojis, hashtags, URLs, brackets, stage directions, markdown. Write numbers as they are said.
 Truth: only facts in the source; "reportedly" for anything unconfirmed; never invent numbers, quotes or dates.
 Advertiser-friendly: no profanity, shock, hate, medical/financial/legal advice, or misleading clickbait (the title must be delivered on by the video).

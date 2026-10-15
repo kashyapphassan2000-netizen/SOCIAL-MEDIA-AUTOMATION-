@@ -274,16 +274,17 @@ function Studio({ t, owner }: { t: Toast; owner: boolean }) {
     api("/api/settings").then((r) => setSettings(r.settings)).catch(t.err);
   }, [t.err]);
   useEffect(() => { load(); }, [load]);
-  async function send(kind: "photo" | "clip" | "performance", file: File) {
+  async function send(kind: "photo" | "clip" | "performance" | "music", file: File) {
     setBusy(kind);
     try {
       let r;
       if (a?.blobUploads) {
         const blob = await upload(`uploads/${kind}-${file.name}`, file, { access: "public", handleUploadUrl: "/api/studio/upload", multipart: file.size > 20e6 });
-        r = await api("/api/studio/assets", { method: "POST", body: JSON.stringify({ kind, url: blob.url }) });
+        r = await api("/api/studio/assets", { method: "POST", body: JSON.stringify({ kind, url: blob.url, name: file.name }) });
       } else {
         const fd = new FormData();
         fd.set("kind", kind);
+        fd.set("name", file.name);
         fd.set("file", file);
         r = await api("/api/studio/assets", { method: "POST", body: fd });
       }
@@ -327,6 +328,19 @@ function Studio({ t, owner }: { t: Toast; owner: boolean }) {
         </div>
         <label className="btn primary" style={{ marginTop: 10 }}>{busy === "performance" ? "Uploading…" : "Add performance clip"}
           <input type="file" accept="video/*" hidden disabled={!!busy} onChange={(e) => e.target.files?.[0] && send("performance", e.target.files[0])} />
+        </label>
+      </div>
+      <div className="card">
+        <h3>4. Music library (optional)</h3>
+        <p className="muted small">Without uploads, every video gets ORIGINAL music composed for it, which can't be claimed. Upload tracks only if you hold the rights (e.g. downloads from the YouTube Audio Library). They rotate under your videos, ducked under your voice.</p>
+        {(a?.assets.music ?? []).map((m) => (
+          <div key={m.url} className="row small" style={{ justifyContent: "space-between" }}>
+            <span>🎵 {m.name}</span>
+            <button className="danger" onClick={async () => { try { await api(`/api/studio/assets?music=${encodeURIComponent(m.url)}`, { method: "DELETE" }); load(); } catch (e) { t.err(e); } }}>Remove</button>
+          </div>
+        ))}
+        <label className="btn" style={{ marginTop: 10 }}>{busy === "music" ? "Uploading…" : "Add music track"}
+          <input type="file" accept="audio/*" hidden disabled={!!busy} onChange={(e) => e.target.files?.[0] && send("music", e.target.files[0])} />
         </label>
       </div>
       {settings && (
@@ -586,8 +600,20 @@ function Settings({ t }: { t: Toast }) {
         <label>Voice providers</label>{order("voiceProviders", opts.voice.filter((x) => !["openai-tts", "free-chatterbox"].includes(x)))}
         <label>Script AI providers</label>{order("llmProviders", opts.llm)}
         <div className="row">
-          <div><label>Background music URL (royalty-free mp3, optional)</label><input value={s.musicUrl} onChange={(e) => set({ musicUrl: e.target.value })} /></div>
+          <div><label>Background music</label>
+            <select value={s.musicMode} onChange={(e) => set({ musicMode: e.target.value as BrandSettings["musicMode"] })}>
+              <option value="auto">Auto — my library if uploaded, else original music (recommended)</option>
+              <option value="generated">Always original generated music (claim-free)</option>
+              <option value="library">Only my uploaded tracks</option>
+              <option value="off">No music</option>
+            </select>
+          </div>
           <div style={{ flex: "0 1 140px" }}><label>Music volume</label><input type="number" step={0.01} min={0} max={1} value={s.musicVolume} onChange={(e) => set({ musicVolume: Number(e.target.value) })} /></div>
+          <div style={{ flex: "0 1 180px" }}><label><input type="checkbox" style={{ width: "auto" }} checked={s.denoise} onChange={(e) => set({ denoise: e.target.checked })} /> Clean voice (noise removal)</label></div>
+        </div>
+        <p className="muted small">Original music is composed for every video (beat-synced cuts, the music drops out on your re-hook, an impact hit brings it back). It exists nowhere else, so it can never get a copyright claim, mute or revenue split. On YouTube Shorts, licensed music sends part of that Short's revenue to music licensing; original music keeps all of it in your creator pool. Upload your own tracks in Studio only if you hold the rights (YouTube Audio Library is safe on YouTube).</p>
+        <div className="row">
+          <div><label>Fixed track URL (optional — overrides the above)</label><input value={s.musicUrl} onChange={(e) => set({ musicUrl: e.target.value })} /></div>
         </div>
       </div>
       <div className="card">

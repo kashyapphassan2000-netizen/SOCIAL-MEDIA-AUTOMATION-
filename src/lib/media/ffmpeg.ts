@@ -79,7 +79,7 @@ export function rmrf(dir: string) {
 
 /** Normalise any voice clip (mp4/mov/m4a/wav) to mono 44.1k mp3 for cloning, trimmed to maxSec. */
 export async function extractVoice(input: string, out: string, maxSec = 120) {
-  await runFfmpeg(["-y", "-i", input, "-vn", "-ac", "1", "-ar", "44100", "-t", String(maxSec), "-af", "highpass=f=70,loudnorm=I=-16:TP=-1.5", "-c:a", "libmp3lame", "-b:a", "160k", out]);
+  await runFfmpeg(["-y", "-i", input, "-vn", "-ac", "1", "-ar", "44100", "-t", String(maxSec), "-af", "highpass=f=70,afftdn=nf=-25:tn=1,loudnorm=I=-16:TP=-1.5", "-c:a", "libmp3lame", "-b:a", "160k", out]);
 }
 
 /** File extension from magic bytes — ffmpeg's image demuxer trusts the extension. */

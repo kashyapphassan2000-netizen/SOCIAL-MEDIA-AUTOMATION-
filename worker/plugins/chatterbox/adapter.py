@@ -3,6 +3,7 @@
 Contract: --text-file T --ref R --lang L --out OUT.wav
 """
 import argparse
+import os
 import re
 import sys
 import time
@@ -26,6 +27,11 @@ def chunks(text: str, limit: int = 260):
     return out
 
 
+# Expressiveness: higher exaggeration = more energetic, entertaining delivery; lower cfg = faster, more natural pacing.
+EXAG = float(os.environ.get("CHATTERBOX_EXAGGERATION", "0.65"))
+CFG = float(os.environ.get("CHATTERBOX_CFG", "0.4"))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--text-file", required=True)
@@ -41,14 +47,14 @@ def main():
         from chatterbox.tts import ChatterboxTTS
 
         model = ChatterboxTTS.from_pretrained(device=device)
-        gen = lambda t: model.generate(t, audio_prompt_path=ref, exaggeration=0.55, cfg_weight=0.5)
+        gen = lambda t: model.generate(t, audio_prompt_path=ref, exaggeration=EXAG, cfg_weight=CFG)
     else:
         from chatterbox.mtl_tts import ChatterboxMultilingualTTS, SUPPORTED_LANGUAGES
 
         if lang not in SUPPORTED_LANGUAGES:
             raise SystemExit(f"language {lang} not supported by Chatterbox multilingual: {sorted(SUPPORTED_LANGUAGES)}")
         model = ChatterboxMultilingualTTS.from_pretrained(device=device)
-        gen = lambda t: model.generate(t, language_id=lang, audio_prompt_path=ref, exaggeration=0.55, cfg_weight=0.5)
+        gen = lambda t: model.generate(t, language_id=lang, audio_prompt_path=ref, exaggeration=EXAG, cfg_weight=CFG)
     print(f"[tts] model loaded on {device} in {time.time() - t0:.0f}s", flush=True)
     pause = torch.zeros(1, int(model.sr * 0.12))
     parts = []

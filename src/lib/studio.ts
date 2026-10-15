@@ -101,3 +101,18 @@ export async function removeClip(url: string): Promise<Assets> {
   await getStorage().del([url]).catch(() => undefined);
   return a;
 }
+
+/** Your own licensed music (e.g. YouTube Audio Library downloads) — rotated under videos when present. */
+export async function addMusicTrack(url: string, name: string, by: string) {
+  const a = await getAssets();
+  const music = [...(a.music ?? []), { url, name: name.slice(0, 80) || "track", addedAt: new Date().toISOString() }].slice(-30);
+  await saveAssets({ ...a, music, updatedAt: new Date().toISOString(), updatedBy: by });
+  return { assets: { ...a, music }, notes: ["Track added. Use only music you have the rights to (YouTube Audio Library tracks are safe on YouTube)."] };
+}
+
+export async function removeMusicTrack(url: string, by: string) {
+  const a = await getAssets();
+  const music = (a.music ?? []).filter((m) => m.url !== url);
+  await saveAssets({ ...a, music, updatedAt: new Date().toISOString(), updatedBy: by });
+  return { ...a, music };
+}
