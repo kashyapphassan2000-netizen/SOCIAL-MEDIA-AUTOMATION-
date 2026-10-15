@@ -141,7 +141,14 @@ export class OpenAICompatLLM implements LLM {
         const r = await httpJson<any>(`${this.base}/chat/completions`, {
           method: "POST",
           headers: this.headers(),
-          body: JSON.stringify({ model, messages: [{ role: "system", content: system }, { role: "user", content: user }], temperature: 0.8, max_tokens: 4000 }),
+          body: JSON.stringify({
+            model,
+            messages: [{ role: "system", content: system }, { role: "user", content: user }],
+            temperature: 0.8,
+            max_tokens: 4000,
+            // The anonymous tier caps output at ~1,500 tokens; full reasoning eats all of it and returns no content.
+            ...(this.keyless ? { reasoning_effort: "low" } : {}),
+          }),
           timeoutMs: 120_000,
           retries: this.keyless ? 0 : undefined,
         });
