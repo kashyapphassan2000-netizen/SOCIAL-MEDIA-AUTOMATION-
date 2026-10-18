@@ -178,7 +178,7 @@ async function script(job: Job, s: BrandSettings): Promise<StageResult> {
     }
   }
   for (const k of ["title", "hook", "spoken", "description", "onScreenHook", "thumbnailText", "pinnedComment"] as const) {
-    if (typeof data[k] === "string") data[k] = decodeEntities(data[k] as string);
+    if (typeof data[k] === "string") data[k] = decodeEntities(decodeEntities(data[k] as string)); // feeds sometimes double-encode (&amp;amp;)
   }
   if (episode !== undefined) {
     const fresh = await getSchedule(sched.id);
