@@ -191,6 +191,8 @@ export interface Job {
   logs: JobLog[];
   sheetLogged?: boolean;
   exported?: boolean;
+  /** Self-heal actions taken (each costs one unit of the job's recovery budget). */
+  heals?: { stage: Stage; at: string; note: string }[];
   /** Final video kept because no platform accepted it. */
   keptForDownload?: boolean;
 }

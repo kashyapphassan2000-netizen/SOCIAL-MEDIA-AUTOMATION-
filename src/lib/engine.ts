@@ -224,6 +224,7 @@ async function look(job: Job, s: BrandSettings): Promise<StageResult> {
     } else {
       try {
         const img = await deps.generateLook(assets.photoUrl, lk.prompt, s.primaryColor);
+        if (img.length < 5_000) throw new Error(`generated image is broken (${img.length} bytes)`);
         const url = await deps.storage().put(`looks/${lk.name.replace(/\W+/g, "-")}.jpg`, img, "image/jpeg");
         const fresh = await getSettings();
         if (fresh.looks[idx]?.name === lk.name) {
@@ -647,7 +648,63 @@ const STAGE_FNS: Record<Exclude<Stage, "done">, (j: Job, s: BrandSettings) => Pr
   research, script, look, voice, avatar, broll: brollStage, edit, publish, cleanup,
 };
 
-/** Run exactly one stage of one job, with retry / fail bookkeeping. */
+/**
+ * Self-healing: when a stage has used all its retries, take the next-best route instead of failing the job.
+ * Each job has a recovery budget, so a genuinely broken setup still ends (and says why) instead of looping.
+ */
+const HEAL_BUDGET = 6;
+
+/** Drop a cached AI look that broke a render, so the next video regenerates it instead of failing again. */
+async function forgetLook(url: string) {
+  const s = await getSettings();
+  let changed = false;
+  for (const l of s.looks) if (l.imageUrl === url) {
+    l.imageUrl = undefined;
+    changed = true;
+  }
+  if (changed) await saveSettings(s);
+}
+type Heal = { to: Stage; wait?: number; note: string; apply?: (j: Job) => void };
+async function healFor(job: Job, stage: Stage): Promise<Heal | null> {
+  const used = (job.heals ?? []).filter((h) => h.stage === stage).length;
+  switch (stage) {
+    case "research":
+      return used < 3 ? { to: "research", wait: 600, note: "no usable story yet — looking at fresh news in 10 min" } : null;
+    case "script":
+      return used < 2 ? { to: "research", note: "the script kept failing — switching to a different trending story" } : null;
+    case "look": {
+      const photo = (await getAssets()).photoUrl;
+      return photo ? { to: "voice", note: "outfit look failed — using your original photo", apply: (j) => (j.data.lookUrl = photo) } : null;
+    }
+    case "voice":
+      return used < 2 ? { to: "voice", wait: 1800, note: "voice clone unavailable — retrying in 30 min (worker or quota outage)" } : null;
+    case "avatar":
+      return { to: "broll", note: "talking-head render failed — using your photo with gentle motion instead", apply: (j) => (j.data.avatarUrl = undefined) };
+    case "broll":
+      return { to: "edit", note: "stock visuals failed — using text scenes instead", apply: (j) => (j.data.broll = []) };
+    case "edit": {
+      // First: the safest inputs (original photo, no talking-head video) and forget a possibly broken AI look.
+      const photo = (await getAssets()).photoUrl;
+      if (used === 0 && photo && (job.data.lookUrl !== photo || job.data.avatarUrl)) {
+        return {
+          to: "edit",
+          note: "render failed — retrying with your original photo",
+          apply: (j) => {
+            const bad = j.data.lookUrl;
+            j.data.lookUrl = photo;
+            j.data.avatarUrl = undefined;
+            if (bad && bad !== photo) void forgetLook(bad);
+          },
+        };
+      }
+      return used < 3 ? { to: "edit", wait: 900, note: "render failed — retrying in 15 min" } : null;
+    }
+    default:
+      return null;
+  }
+}
+
+/** Run exactly one stage of one job, with retry / self-heal / fail bookkeeping. */
 export async function stepJob(job: Job): Promise<Job> {
   if (job.stage === "done") return job;
   const s = await getSettings();
@@ -668,7 +725,16 @@ export async function stepJob(job: Job): Promise<Job> {
     job.stageAttempts++;
     const msg = (e as Error).message ?? String(e);
     log(job, "error", `${stage} attempt ${job.stageAttempts}/${MAX_ATTEMPTS[stage]}: ${msg}`);
-    if (job.stageAttempts >= MAX_ATTEMPTS[stage]) {
+    const heal = job.stageAttempts >= MAX_ATTEMPTS[stage] && (job.heals?.length ?? 0) < HEAL_BUDGET ? await healFor(job, stage) : null;
+    if (heal) {
+      (job.heals ??= []).push({ stage, at: new Date().toISOString(), note: heal.note });
+      log(job, "warn", `Self-heal: ${heal.note}`);
+      heal.apply?.(job);
+      job.stage = heal.to;
+      job.stageAttempts = 0;
+      job.status = heal.wait ? "waiting" : "running";
+      job.nextAttemptAt = heal.wait ? after(heal.wait) : undefined;
+    } else if (job.stageAttempts >= MAX_ATTEMPTS[stage]) {
       if (stage === "cleanup") {
         job.finishedAt = new Date().toISOString();
         job.stage = "done";

@@ -5,6 +5,7 @@ import { getJob, listRecentJobs, getSettings, saveSettings, getAssets, saveAsset
 import { flushSheet } from "@/lib/sheets";
 import { AVATAR_REGISTRY } from "@/lib/ai/avatar";
 import type { Story } from "@/lib/types";
+import { SCRIPT_SYSTEM } from "@/lib/ai/prompts";
 import { fastForward, mockAvatar, mockLLM, mockPublishers, mockVoice, saveSchedule, schedule, setup, type MemorySheet } from "./helpers";
 
 const STORIES: Story[] = [
@@ -151,6 +152,43 @@ describe("full pipeline", () => {
     expect(Object.values(calls).reduce((a, b) => a + b, 0)).toBe(0);
     expect(sheet.rows.find((r) => r.tab === "Runs")?.row).toContain("FAILED");
   });
+
+  it("self-heals: a story whose script keeps failing is swapped for another and the job still finishes", async () => {
+    const base = mockLLM();
+    let scriptCalls = 0;
+    const llm = {
+      ...base,
+      name: "picky-llm",
+      available: () => true,
+      async complete(system: string, user: string) {
+        if (system === SCRIPT_SYSTEM && user.includes("OpenAI launches")) {
+          scriptCalls++;
+          throw new Error("simulated: provider keeps returning broken JSON");
+        }
+        return base.complete(system, user);
+      },
+    };
+    const { pubs } = mockPublishers({});
+    setDeps({
+      enrich: async (st) => st,
+      llms: () => [llm],
+      voices: () => [mockVoice("f5")],
+      avatars: () => [AVATAR_REGISTRY.still],
+      trends,
+      publishers: pubs,
+      generateLook: async () => fs.readFileSync((await getAssets()).photoUrl!.slice(7)),
+    });
+    const sch = schedule();
+    await saveSchedule(sch);
+    const job = await createJob(sch, "manual", "owner@test");
+    const done = await runUntilDone(job.id, 60);
+    expect(scriptCalls).toBeGreaterThan(0);
+    if (done?.status === "failed") console.log(done.error, JSON.stringify(done.heals), done.logs.map((l) => `${l.stage} ${l.level} ${l.msg}`).join("\n").slice(-2500));
+    expect(done?.stage).toBe("done");
+    expect(done?.status).not.toBe("failed");
+    expect(done?.heals?.[0]).toMatchObject({ stage: "script" });
+    expect(done?.data.story?.title).toBe("Google ships Gemini update");
+  }, 300_000);
 
   it("missing photo fails with an actionable message", async () => {
     const { pubs } = mockPublishers({});

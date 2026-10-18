@@ -32,7 +32,7 @@ const KNOWN: { prefix: RegExp; label: string; kind: CustomLLM["kind"]; baseUrl: 
   { prefix: /^gsk_/, label: "Groq", kind: "openai", baseUrl: "https://api.groq.com/openai/v1" },
   { prefix: /^csk-/, label: "Cerebras", kind: "openai", baseUrl: "https://api.cerebras.ai/v1" },
   { prefix: /^nvapi-/, label: "NVIDIA NIM", kind: "openai", baseUrl: "https://integrate.api.nvidia.com/v1" },
-  { prefix: /^AIza/, label: "Google Gemini", kind: "openai", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai" },
+  { prefix: /^(AIza|AQ\.)/, label: "Google Gemini", kind: "openai", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai" },
   { prefix: /^xai-/, label: "xAI Grok", kind: "openai", baseUrl: "https://api.x.ai/v1" },
   { prefix: /^pplx-/, label: "Perplexity", kind: "openai", baseUrl: "https://api.perplexity.ai" },
   { prefix: /^hf_/, label: "Hugging Face", kind: "openai", baseUrl: "https://router.huggingface.co/v1" },
