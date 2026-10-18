@@ -48,11 +48,23 @@ function runOnce(args: string[], timeoutMs: number, stallMs: number): Promise<st
   return new Promise((resolve, reject) => {
     const p = spawn(/*turbopackIgnore: true*/ ffmpegPath(), ["-hide_banner", "-nostdin", "-stats", "-stats_period", "1", ...args], { stdio: ["ignore", "ignore", "pipe"] });
     let err = "";
+    // Progress = the frame/time counter in ffmpeg's status line moving. A frozen ffmpeg keeps printing the
+    // same status line every second, so "any output" is not proof of life.
     let last = Date.now();
+    let mark = "";
     p.stderr.on("data", (d) => {
-      last = Date.now();
-      err += d.toString();
+      const chunk = d.toString();
+      err += chunk;
       if (err.length > 200_000) err = err.slice(-100_000);
+      // Only the frame number and timestamp: fps/speed keep changing on a frozen process.
+      const frames = [...chunk.matchAll(/frame=\s*(\d+)/g)].pop()?.[1];
+      const time = [...chunk.matchAll(/time=\s*(\S+)/g)].pop()?.[1];
+      const cur = frames || time ? `${frames ?? ""}|${time ?? ""}` : "";
+      if (!cur || cur !== mark) {
+        // Non-status output (probing, warnings) or an advancing counter both count as progress.
+        mark = cur || mark;
+        last = Date.now();
+      }
     });
     const done = () => {
       clearTimeout(timer);
@@ -67,7 +79,7 @@ function runOnce(args: string[], timeoutMs: number, stallMs: number): Promise<st
       if (Date.now() - last < stallMs) return;
       done();
       p.kill("SIGKILL");
-      reject(new FfmpegStalled(`ffmpeg stalled (no progress for ${stallMs / 1000}s)`));
+      reject(new FfmpegStalled(`ffmpeg stalled (frame counter stuck for ${stallMs / 1000}s)`));
     }, 2_000);
     p.on("error", (e) => {
       done();
