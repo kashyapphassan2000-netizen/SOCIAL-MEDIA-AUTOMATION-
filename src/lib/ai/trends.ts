@@ -75,16 +75,44 @@ async function publisherFeed(url: string): Promise<Story[]> {
  * invent numbers when they only see a title). Best effort: paragraphs only, ~3,000 chars.
  */
 export async function enrichStory(story: Story): Promise<Story> {
-  if (!/^https?:\/\//.test(story.url) || /news\.google\.com/.test(story.url)) return story;
+  // Google News links can't be opened server-side: find the same story's publisher pages via Bing News.
+  const urls = /^https?:\/\//.test(story.url) && !/news\.google\.com/.test(story.url) ? [story.url] : [];
+  if (!urls.length) urls.push(...(await articleLinks(story.title).catch(() => [] as string[])));
+  for (const url of urls.slice(0, 4)) {
+    const details = await articleText(url);
+    if (details) return { ...story, details, url: story.url && !/news\.google\.com/.test(story.url) ? story.url : url };
+  }
+  return story;
+}
+
+async function articleText(url: string): Promise<string | null> {
   try {
-    const res = await http(story.url, { timeoutMs: 15_000, retries: 0, headers: { "User-Agent": "Mozilla/5.0 (compatible; ShortsAutopilot)" } });
+    const res = await http(url, { timeoutMs: 15_000, retries: 0, headers: { "User-Agent": "Mozilla/5.0 (compatible; ShortsAutopilot)" } });
     const html = (await res.text()).slice(0, 1_500_000);
     const paras = [...html.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/g)].map((m) => strip(m[1])).filter((t) => t.length > 60);
     const details = paras.join(" ").slice(0, 3000);
-    return details.length > 200 ? { ...story, details } : story;
+    return details.length > 200 ? details : null;
   } catch {
-    return story;
+    return null;
   }
+}
+
+/** Publisher links for a headline (Bing News RSS; its click-tracking links carry the target in ?url=). */
+export async function articleLinks(title: string): Promise<string[]> {
+  const res = await http(`https://www.bing.com/news/search?q=${encodeURIComponent(title.slice(0, 120))}&format=rss`, { timeoutMs: 15_000, retries: 1, headers: { "User-Agent": "Mozilla/5.0" } });
+  const xml = await res.text();
+  const out: string[] = [];
+  for (const it of xml.match(/<item>[\s\S]*?<\/item>/g) ?? []) {
+    const link = decodeEntities(/<link>([\s\S]*?)<\/link>/.exec(it)?.[1] ?? "");
+    let target = link;
+    try {
+      target = new URL(link).searchParams.get("url") || link;
+    } catch {
+      continue;
+    }
+    if (/^https?:\/\//.test(target) && !/bing\.com|msn\.com/.test(new URL(target).hostname)) out.push(target);
+  }
+  return out;
 }
 
 async function googleNews(query: string, lang: string): Promise<Story[]> {

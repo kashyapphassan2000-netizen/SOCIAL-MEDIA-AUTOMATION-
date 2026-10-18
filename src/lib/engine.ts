@@ -3,7 +3,7 @@ import path from "node:path";
 import { LLM_REGISTRY, generateJson, type LLM } from "./ai/llm";
 import { loadCustomLLMs } from "./ai/custom";
 import { WEBHOOK_MEDIA_HOLD_MIN } from "./outlets";
-import { PICK_SYSTEM, SCRIPT_SYSTEM, pickUser, scriptUser, validateScript } from "./ai/prompts";
+import { FACTCHECK_SYSTEM, PICK_SYSTEM, SCRIPT_SYSTEM, factcheckUser, pickUser, scriptUser, validateScript } from "./ai/prompts";
 import { decodeEntities, enrichStory, fetchTrends, storyHash, type TrendFetcher } from "./ai/trends";
 import { VOICE_REGISTRY, type VoiceProvider } from "./ai/voice";
 import { AVATAR_REGISTRY, type AvatarProvider } from "./ai/avatar";
@@ -116,7 +116,20 @@ async function research(job: Job, s: BrandSettings): Promise<StageResult> {
       ? { ...candidates[data.index], viralityScore: data.viralityScore, angle: data.angle }
       : { title: data.evergreen!.title, summary: data.evergreen!.summary, url: "", source: "evergreen idea", hash: storyHash(data.evergreen!.title), angle: data.angle, viralityScore: data.viralityScore };
   await markStoryUsed(job.scheduleId, story.hash);
-  job.data.story = await deps.enrich(story);
+  // A script written from a headline alone makes things up. If the pick has no readable article,
+  // take the next fresh candidate that does (tried in list order, a few at most).
+  let enriched = await deps.enrich(story);
+  if (!enriched.details) {
+    for (const alt of candidates.filter((c) => c.hash !== story.hash).slice(0, 4)) {
+      const e = await deps.enrich(alt);
+      if (!e.details) continue;
+      log(job, "warn", `No article text for "${story.title}" — switched to "${alt.title}", which has a readable source`);
+      await markStoryUsed(job.scheduleId, alt.hash);
+      enriched = { ...e, angle: undefined };
+      break;
+    }
+  }
+  job.data.story = enriched;
   if (job.data.story.details) log(job, "info", `Read the article (${job.data.story.details.length} chars) to ground the script in real facts`);
   log(job, "info", `Picked (${provider}, score ${story.viralityScore ?? "?"}): ${story.title}`);
   return { next: "script" };
@@ -141,6 +154,29 @@ async function script(job: Job, s: BrandSettings): Promise<StageResult> {
     },
   );
   if (errors.length) log(job, "warn", `LLM retries: ${errors.join(" | ")}`);
+  // Second pass: the script may only claim what the article says. One rewrite if it invented anything.
+  const story = job.data.story!;
+  if (story.details) {
+    try {
+      const fc = await generateJson(deps.llms(s), FACTCHECK_SYSTEM, factcheckUser(story.details, data.spoken), (v) => {
+        const u = (v as { unsupported?: unknown }).unsupported;
+        if (!Array.isArray(u)) throw new Error("unsupported[] missing");
+        return u.map(String).filter(Boolean).slice(0, 8);
+      });
+      if (fc.data.length) {
+        log(job, "warn", `Fact-check removed unsupported claims: ${fc.data.join(" | ").slice(0, 400)}`);
+        const fixed = await generateJson(
+          deps.llms(s),
+          SCRIPT_SYSTEM,
+          `${scriptUser({ ...sched, targetSeconds: target }, story, s, { hookStyle, episode, learnings: learned })}\n\nA fact-checker found claims NOT in the article. Rewrite without them (say less rather than guess): ${fc.data.join("; ")}`,
+          (v) => validateScript(v, target),
+        );
+        Object.assign(data, fixed.data);
+      }
+    } catch (e) {
+      log(job, "warn", `Fact-check skipped: ${(e as Error).message.slice(0, 200)}`);
+    }
+  }
   for (const k of ["title", "hook", "spoken", "description", "onScreenHook", "thumbnailText", "pinnedComment"] as const) {
     if (typeof data[k] === "string") data[k] = decodeEntities(data[k] as string);
   }

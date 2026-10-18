@@ -61,6 +61,20 @@ export const PROFILES: Profile[] = [
 const between = (iv: [number, number][]) => iv.map(([a, b]) => `between(t,${a.toFixed(2)},${b.toFixed(2)})`).join("+");
 
 /** A short, licence-free "whoosh" synthesised from filtered noise (no stock SFX needed). */
+/** Volume expression: 0.45 while speaking (gaps under 0.35 s count as speech), 1 in real pauses. */
+export function duckExpr(words: WordTiming[]): string {
+  const spans: [number, number][] = [];
+  for (const w of words) {
+    const last = spans[spans.length - 1];
+    if (last && w.start - last[1] < 0.35) last[1] = Math.max(last[1], w.end);
+    else spans.push([w.start, w.end]);
+  }
+  if (!spans.length) return "1";
+  // Used inside '...' in the filtergraph, so the commas need no escaping.
+  const on = spans.slice(0, 60).map(([a, b]) => `between(t,${a.toFixed(2)},${(b + 0.12).toFixed(2)})`).join("+");
+  return `if(${on},0.45,1)`;
+}
+
 /** Face box for the explainer layout: bottom-right, kept clear of the platforms' like/comment buttons and caption area. */
 export function pipGeometry(w: number, h: number) {
   const k = w / 1080;
@@ -183,12 +197,12 @@ export async function renderShort(inp: EditInput, profile: Profile, timeoutMs = 
   // Noise reduction belongs on your recorded reference (done at upload); on generated speech it adds a metallic,
   // "AI" edge. Here only a rumble cut and gentle compression so the voice sits forward like a real mic.
   const clean = inp.denoise === false ? "" : "highpass=f=80,acompressor=threshold=-21dB:ratio=2.5:attack=8:release=120:makeup=2,";
-  f.push(`[${iAud}:a]aresample=44100,${clean}aformat=channel_layouts=stereo${iMus >= 0 ? ",asplit=2[voice][vkey]" : "[voice]"}`);
+  f.push(`[${iAud}:a]aresample=44100,${clean}aformat=channel_layouts=stereo[voice]`);
   mix.push("[voice]");
   if (iMus >= 0) {
-    // Music sits under the voice and ducks further while you speak (side-chain), swelling back in the gaps.
-    f.push(`[${iMus}:a]aresample=44100,aformat=channel_layouts=stereo,volume=${inp.musicVolume}[mraw]`);
-    f.push(`[mraw][vkey]sidechaincompress=threshold=0.03:ratio=6:attack=15:release=350[mus]`);
+    // Music sits under the voice and dips further while you speak, swelling back in the gaps. Driven by the word
+    // timings, not a side-chain: splitting the voice to key a compressor makes a diamond graph ffmpeg can deadlock on.
+    f.push(`[${iMus}:a]aresample=44100,aformat=channel_layouts=stereo,volume=${inp.musicVolume},volume='${duckExpr(inp.words)}':eval=frame[mus]`);
     mix.push("[mus]");
   }
   if (iSfx >= 0) {

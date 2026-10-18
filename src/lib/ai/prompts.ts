@@ -161,3 +161,12 @@ export function validateScript(v: unknown, targetSeconds: number): Script {
     pinnedComment: typeof o.pinnedComment === "string" ? o.pinnedComment.trim().slice(0, 300) : undefined,
   };
 }
+
+export const FACTCHECK_SYSTEM = `You are a strict fact-checker for a news video. You get an article and a spoken script.
+List every factual claim in the script (features, numbers, dates, names, capabilities, availability, prices) that the article does NOT state or clearly imply.
+Opinions, predictions and advice that are framed as the creator's view ("I think", "my take", "you should try it") are fine and must NOT be listed.
+Respond with JSON only: {"unsupported": ["claim 1", "..."]}`;
+
+export function factcheckUser(article: string, spoken: string): string {
+  return `ARTICLE:\n${article}\n\nSCRIPT:\n${spoken}`;
+}

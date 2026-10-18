@@ -27,24 +27,54 @@ export function fontsDir(): string {
   return path.join(process.cwd(), "assets", "fonts");
 }
 
-export async function runFfmpeg(args: string[], timeoutMs = 240_000): Promise<string> {
+/**
+ * Run ffmpeg. A watchdog kills a render that stops reporting progress (ffmpeg prints stats ~2x/s while working)
+ * and retries it: ffmpeg 7.0 occasionally freezes in its threaded scheduler when several renders share a CPU.
+ */
+export async function runFfmpeg(args: string[], timeoutMs = 240_000, stallMs = 30_000): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await runOnce(args, Math.max(5_000, deadline - Date.now()), stallMs);
+    } catch (e) {
+      if (!(e instanceof FfmpegStalled) || attempt >= 3 || Date.now() > deadline - 10_000) throw e;
+    }
+  }
+}
+
+class FfmpegStalled extends Error {}
+
+function runOnce(args: string[], timeoutMs: number, stallMs: number): Promise<string> {
   return new Promise((resolve, reject) => {
-    const p = spawn(/*turbopackIgnore: true*/ ffmpegPath(), ["-hide_banner", "-nostdin", ...args], { stdio: ["ignore", "ignore", "pipe"] });
+    const p = spawn(/*turbopackIgnore: true*/ ffmpegPath(), ["-hide_banner", "-nostdin", "-stats", "-stats_period", "1", ...args], { stdio: ["ignore", "ignore", "pipe"] });
     let err = "";
+    let last = Date.now();
     p.stderr.on("data", (d) => {
+      last = Date.now();
       err += d.toString();
       if (err.length > 200_000) err = err.slice(-100_000);
     });
-    const timer = setTimeout(() => {
-      p.kill("SIGKILL");
-      reject(new Error(`ffmpeg timed out after ${timeoutMs / 1000}s`));
-    }, timeoutMs);
-    p.on("error", (e) => {
+    const done = () => {
       clearTimeout(timer);
+      clearInterval(watch);
+    };
+    const timer = setTimeout(() => {
+      done();
+      p.kill("SIGKILL");
+      reject(new Error(`ffmpeg timed out after ${Math.round(timeoutMs / 1000)}s`));
+    }, timeoutMs);
+    const watch = setInterval(() => {
+      if (Date.now() - last < stallMs) return;
+      done();
+      p.kill("SIGKILL");
+      reject(new FfmpegStalled(`ffmpeg stalled (no progress for ${stallMs / 1000}s)`));
+    }, 2_000);
+    p.on("error", (e) => {
+      done();
       reject(e);
     });
     p.on("close", (code) => {
-      clearTimeout(timer);
+      done();
       if (code === 0) resolve(err);
       else reject(new Error(`ffmpeg exited ${code}: ${err.split("\n").slice(-12).join("\n")}`));
     });
