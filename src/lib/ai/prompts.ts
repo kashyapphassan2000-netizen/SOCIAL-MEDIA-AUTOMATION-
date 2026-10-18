@@ -77,7 +77,7 @@ export function scriptUser(s: Schedule, story: Story, brand: BrandSettings, ctx:
   const learn = ctx.learnings
     ? `\nWhat this audience rewarded recently (use it, don't copy it):\n${ctx.learnings.summary}\nTop titles: ${ctx.learnings.topTitles.join(" | ") || "n/a"}\nWeak titles (avoid their pattern): ${ctx.learnings.weakTitles.join(" | ") || "n/a"}\n`
     : "";
-  return `Creator brand: ${brand.brandName} (${brand.handle}). Brand promise: ${brand.brandPromise || "smart, fast, practical takes"}.
+  return `Creator brand: ${brand.brandName}${brand.handle ? ` (${brand.handle})` : ""}. Brand promise: ${brand.brandPromise || "smart, fast, practical takes"}.
 ${series ? `Recurring series: "${series}" — the title MUST start with "${series}: ". Viewers should recognise the format instantly.` : ""}
 Niche: ${s.topic}
 Owner direction: ${s.instructions || "(none)"}

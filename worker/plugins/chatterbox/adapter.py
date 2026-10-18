@@ -28,9 +28,9 @@ def chunks(text: str, limit: int = 180):
 
 
 # Delivery. exaggeration: 0.5 = like your reference, higher = more dramatic (too high sounds acted/robotic).
-# cfg_weight: lower = looser, more conversational pacing. Tuned by ear on CPU A/B tests.
-EXAG = float(os.environ.get("CHATTERBOX_EXAGGERATION", "0.5"))
-CFG = float(os.environ.get("CHATTERBOX_CFG", "0.35"))
+# cfg_weight: lower = looser, more conversational pacing. Owner picked the "energetic" A/B sample (0.62 / 0.3).
+EXAG = float(os.environ.get("CHATTERBOX_EXAGGERATION", "0.62"))
+CFG = float(os.environ.get("CHATTERBOX_CFG", "0.3"))
 TEMP = float(os.environ.get("CHATTERBOX_TEMPERATURE", "0.8"))
 
 
