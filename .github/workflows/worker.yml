@@ -47,7 +47,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           # Only when nothing is already running; the app's own dispatch (GH_DISPATCH_TOKEN) is optional.
-          kinds=$(curl -sS --max-time 30 -H "Authorization: Bearer $BEARER" "$APP_URL/api/worker/pending" | python3 -c "import json,sys;d=json.load(sys.stdin);print(','.join(d.get('queuedKinds',[])))" 2>/dev/null || true)
+          # The tick runs after we return, so voice/video tasks may be queued a few seconds later:
+          # while a job is active, keep checking for up to 2 minutes before giving up.
+          kinds=""
+          for i in 1 2 3 4 5 6 7; do
+            out=$(curl -sS --max-time 30 -H "Authorization: Bearer $BEARER" "$APP_URL/api/worker/pending" || true)
+            kinds=$(echo "$out" | python3 -c "import json,sys;d=json.load(sys.stdin);print(','.join(d.get('queuedKinds',[])))" 2>/dev/null || true)
+            active=$(echo "$out" | python3 -c "import json,sys;print(json.load(sys.stdin).get('activeJobs',0))" 2>/dev/null || echo 0)
+            if [ -n "$kinds" ] || [ "$active" = "0" ]; then break; fi
+            sleep 20
+          done
           if [ -z "$kinds" ]; then echo "queue empty"; exit 0; fi
           active=$(gh run list -R "$GITHUB_REPOSITORY" -w free-worker.yml --json status -q '[.[]|select(.status=="in_progress" or .status=="queued")]|length')
           if [ "${active:-0}" != "0" ]; then echo "free-worker already running"; exit 0; fi

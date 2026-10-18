@@ -42,14 +42,15 @@ class GeminiLLM implements LLM {
   }
   async complete(system: string, user: string) {
     // Free tier is Flash-only; try the configured model, then newer/older Flash fallbacks.
-    const models = [process.env.GEMINI_MODEL, "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-flash-latest"].filter((m, i, a): m is string => !!m && a.indexOf(m) === i);
+    const models = [process.env.GEMINI_MODEL, "gemini-3.6-flash", "gemini-2.5-flash", "gemini-flash-latest", "gemini-3.5-flash-lite", "gemini-2.5-flash-lite"].filter((m, i, a): m is string => !!m && a.indexOf(m) === i);
     let last: unknown;
     for (const model of models) {
       try {
         return await this.call(model, system, user);
       } catch (e) {
         last = e;
-        if (!(e instanceof HttpFailure && e.status === 404)) throw e;
+        // Unknown model for this key, overloaded, or rate-limited: the next model usually works.
+        if (!(e instanceof HttpFailure && [404, 429, 500, 503].includes(e.status))) throw e;
       }
     }
     throw last;
@@ -64,6 +65,7 @@ class GeminiLLM implements LLM {
         generationConfig: { responseMimeType: "application/json", temperature: 0.9 },
       }),
       timeoutMs: 120_000,
+      retries: 0, // overloads are handled by moving to the next model, not by waiting on this one
     });
     const text = (r.candidates?.[0]?.content?.parts ?? []).map((p: any) => p.text ?? "").join("");
     if (!text) throw new Error(`Gemini returned no text: ${JSON.stringify(r.promptFeedback ?? r).slice(0, 300)}`);
